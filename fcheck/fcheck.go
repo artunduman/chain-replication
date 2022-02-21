@@ -49,7 +49,7 @@ type StartStruct struct {
 	AckLocalIPAckLocalPort       string
 	EpochNonce                   uint64
 	HBeatLocalIPHBeatLocalPort   string
-	HBeatRemoteIPHBeatRemotePort string
+	HBeatRemoteIPHBeatRemotePort []string
 	LostMsgThresh                uint8
 }
 
@@ -63,7 +63,8 @@ type readStruct struct {
 var isActive bool = false
 
 var stopAck chan bool = make(chan bool)
-var stopHBeat chan bool = make(chan bool)
+var stopHBeatMap map[string]chan bool = make(map[string]chan bool)
+var notifyCh chan FailureDetected
 
 // Starts the fcheck library.
 func Start(arg StartStruct) (notifyCh <-chan FailureDetected, err error) {
@@ -89,10 +90,11 @@ func Start(arg StartStruct) (notifyCh <-chan FailureDetected, err error) {
 		return nil, err
 	}
 
-	notifyCh, err = hbeatInit(arg)
+	err = hbeatInit(arg)
 
 	if err != nil {
-		stopAck <- true
+		writeStopChannels()
+
 		return nil, err
 	}
 
@@ -104,10 +106,19 @@ func Start(arg StartStruct) (notifyCh <-chan FailureDetected, err error) {
 // Tells the library to stop monitoring/responding acks.
 func Stop() {
 	if isActive {
-		stopAck <- true
-		stopHBeat <- true
+		writeStopChannels()
+
+		close(notifyCh)
 
 		isActive = false
+	}
+}
+
+func writeStopChannels() {
+	stopAck <- true
+
+	for _, stopHBeat := range stopHBeatMap {
+		stopHBeat <- true
 	}
 }
 
@@ -129,33 +140,36 @@ func ackInit(arg StartStruct) error {
 	return nil
 }
 
-func hbeatInit(arg StartStruct) (<-chan FailureDetected, error) {
+func hbeatInit(arg StartStruct) error {
 	laddr, err := net.ResolveUDPAddr("udp", arg.HBeatLocalIPHBeatLocalPort)
 
 	if err != nil {
-		return nil, errors.New("failed to resolve UDP address")
+		return errors.New("failed to resolve UDP address")
 	}
 
-	raddr, err := net.ResolveUDPAddr("udp", arg.HBeatRemoteIPHBeatRemotePort)
+	notifyCh = make(chan FailureDetected, len(arg.HBeatRemoteIPHBeatRemotePort))
 
-	if err != nil {
-		return nil, errors.New("failed to resolve UDP address")
+	for _, ipPort := range arg.HBeatRemoteIPHBeatRemotePort {
+		raddr, err := net.ResolveUDPAddr("udp", ipPort)
+
+		if err != nil {
+			return errors.New("failed to resolve UDP address")
+		}
+
+		conn, err := net.DialUDP("udp", laddr, raddr)
+
+		if err != nil {
+			return errors.New("failed to dial")
+		}
+
+		stopHBeatMap[ipPort] = make(chan bool)
+		go hbeat(arg, ipPort, conn)
 	}
 
-	conn, err := net.DialUDP("udp", laddr, raddr)
-
-	if err != nil {
-		return nil, errors.New("failed to dial")
-	}
-
-	notifyCh := make(chan FailureDetected, 2)
-
-	go hbeat(arg, notifyCh, conn)
-
-	return notifyCh, nil
+	return nil
 }
 
-func hbeat(arg StartStruct, notifyCh chan FailureDetected, conn *net.UDPConn) {
+func hbeat(arg StartStruct, ipPort string, conn *net.UDPConn) {
 	defer conn.Close()
 
 	seqNumMap := make(map[uint64]time.Time)
@@ -180,8 +194,8 @@ func hbeat(arg StartStruct, notifyCh chan FailureDetected, conn *net.UDPConn) {
 	InnerLoop:
 		for {
 			select {
-			case <-stopHBeat:
-				close(notifyCh)
+			case <-stopHBeatMap[ipPort]:
+				delete(stopHBeatMap, ipPort)
 				return
 			case <-handleRead(&rs, deadline, conn):
 				if rs.err != nil {
@@ -215,15 +229,14 @@ func hbeat(arg StartStruct, notifyCh chan FailureDetected, conn *net.UDPConn) {
 
 		if numLost >= arg.LostMsgThresh {
 			notifyCh <- FailureDetected{
-				UDPIpPort: arg.HBeatRemoteIPHBeatRemotePort,
+				UDPIpPort: ipPort,
 				Timestamp: time.Now(),
 			}
 
-			close(notifyCh)
-			<-stopHBeat
+			<-stopHBeatMap[ipPort]
+			delete(stopHBeatMap, ipPort)
 			return
 		}
-
 	}
 }
 
