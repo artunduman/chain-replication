@@ -159,6 +159,7 @@ func (c *Coord) Join(args JoinArgs, reply *JoinReply) error {
 		prevServerAddr := c.discoveredServers[prevServerId].remoteIpPort
 		*reply = JoinReply{PrevServerAddress: prevServerAddr}
 	}
+	c.cond.Broadcast()
 	return nil
 }
 

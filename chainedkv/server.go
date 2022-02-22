@@ -160,7 +160,7 @@ func (s *Server) Start(serverId uint8, coordAddr string, serverAddr string, serv
 		log.Println("Server.Start: can't dial coordinator, make sure it's up:", err)
 		return err
 	}
-	log.Printf("Server %s started...\n", serverId)
+	log.Printf("Server %d started...\n", serverId)
 
 	// Join to coord
 	log.Println("Server.Start: sending Join to coord")
@@ -184,7 +184,7 @@ func (s *Server) Start(serverId uint8, coordAddr string, serverAddr string, serv
 		s.PrevServer = nil
 	} else {
 		s.IsHead = false
-		s.PrevServer, err = util.GetRPCClient(reply.PrevServerAddress, coordAddr)
+		s.PrevServer, err = rpc.Dial("tcp", reply.PrevServerAddress) // TODO possibly change to GetRPCClient depending on config updates on piazza
 		if err != nil {
 			log.Println("Server.Start: can't dial prev server:", err)
 			return err
