@@ -130,8 +130,6 @@ type Server struct {
 	PrevServer *rpc.Client
 	Tracer     *tracing.Tracer
 	Coord      *rpc.Client
-	IsHead     bool
-	IsTail     bool
 }
 
 func (s *Server) Start(serverId uint8, coordAddr string, serverAddr string, serverListenAddr string, clientListenAddr string, strace *tracing.Tracer) error {
@@ -176,14 +174,11 @@ func (s *Server) Start(serverId uint8, coordAddr string, serverAddr string, serv
 	}
 	log.Printf("Server.Start: Server %d joined the chain\n", serverId)
 	s.Id = serverId
-	s.NextServer = nil // I'm the tail, for now
-	s.IsTail = true
+	s.NextServer = nil                 // I'm the tail, for now
 	if reply.PrevServerAddress == "" { // TODO there is probably a better way to do this
 		// I'm also the head!
-		s.IsHead = true
 		s.PrevServer = nil
 	} else {
-		s.IsHead = false
 		s.PrevServer, err = rpc.Dial("tcp", reply.PrevServerAddress) // TODO possibly change to GetRPCClient depending on config updates on piazza
 		if err != nil {
 			log.Println("Server.Start: can't dial prev server:", err)
@@ -230,17 +225,12 @@ func (s *Server) RegisterPrevServer(prevServerAddress string, reply *bool) error
 	*reply = true
 	return nil
 }
-
-func (s *Server) MakeHead(_, reply *bool) error {
-	s.IsHead = true
-	*reply = true
-	return nil
+func (s *Server) IsTail() bool {
+	return s.NextServer == nil
 }
 
-func (s *Server) MakeTail(_, reply *bool) error {
-	s.IsTail = true
-	*reply = true
-	return nil
+func (s *Server) IsHead() bool {
+	return s.PrevServer == nil
 }
 
 type PutArgs struct {
@@ -259,12 +249,12 @@ type PutReply struct {
 func (s *Server) Put(args PutArgs, reply *PutReply) error {
 	log.Printf("Server.Put: Put %s:%s to server %d\n", args.Key, args.Value, s.Id)
 	// TODO server magic here
-	if s.IsHead {
-		// Ordering
-	} else if s.IsTail {
-		// Respond to client
+	if s.IsHead() {
+		// TODO do ordering
+	}
+	if s.IsTail() {
+		// TODO Respond to client
 	} else {
-		// Recursively call next server
 		err := s.NextServer.Call("Server.Put", args, reply) // Possibly .Go()?
 		if err != nil {
 			return err
@@ -284,7 +274,7 @@ type GetReply struct {
 }
 
 func (s *Server) Get(args GetArgs, reply *GetReply) error {
-	if !s.IsTail {
+	if !s.IsTail() {
 		return errors.New("Server.Get: not tail")
 	}
 	// TODO Return the value here
