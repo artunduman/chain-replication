@@ -2,6 +2,13 @@ package chainedkv
 
 import (
 	"errors"
+	"log"
+	"net"
+	"net/rpc"
+	"os"
+	"os/signal"
+	"sync"
+	"syscall"
 
 	"github.com/DistributedClocks/tracing"
 )
@@ -63,10 +70,111 @@ type CoordConfig struct {
 	TracingIdentity     string
 }
 
+type ServerNode struct {
+	remoteIpPort string
+	client       *rpc.Client
+}
+
 type Coord struct {
-	// Coord state may go here
+	currChainLen      uint8
+	discoveredServers map[uint8]*ServerNode
+	cond              *sync.Cond
 }
 
 func (c *Coord) Start(clientAPIListenAddr string, serverAPIListenAddr string, lostMsgsThresh uint8, numServers uint8, ctrace *tracing.Tracer) error {
+	c.discoveredServers = make(map[uint8]*ServerNode)
+	c.currChainLen = 0
+	c.cond = sync.NewCond(&sync.Mutex{})
+	err := rpc.Register(c)
+	if err != nil {
+		log.Println("Coord.Start: rpc.Register failed:", err)
+		return err
+	}
+	tcpAddrClient, err := net.ResolveTCPAddr("tcp", clientAPIListenAddr)
+	tcpAddrServer, err := net.ResolveTCPAddr("tcp", serverAPIListenAddr)
+	if err != nil {
+		log.Println("Coord.Start: can't resolve TCP address:", err)
+		return err
+	}
+	clientListener, err := net.ListenTCP("tcp", tcpAddrClient)
+	serverListener, err := net.ListenTCP("tcp", tcpAddrServer)
+	if err != nil {
+		log.Println("Coord.Start: can't listen on TCP address:", err)
+		return err
+	}
+	go rpc.Accept(clientListener)
+	go rpc.Accept(serverListener)
+	// Wait for interrupt
+	log.Println("Coord started...")
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
+	<-sig
+	log.Println("Coord stopped...")
+	return nil
+}
+
+type JoinArgs struct {
+	ServerId   uint8
+	ServerAddr string
+	Token      tracing.TracingToken
+}
+
+type JoinReply struct {
+	PrevServerAddress string
+}
+
+func (c *Coord) Join(args JoinArgs, reply *JoinReply) error {
+	// Dial rpc for server
+	log.Println("Coord.Join: received join from", args.ServerId)
+	client, err := rpc.Dial("tcp", args.ServerAddr)
+	if err != nil {
+		log.Println("Coord.Join: can't dial server:", err)
+		return err // TODO make this more descriptive
+	}
+	// Lock the critical section
+	c.cond.L.Lock()
+	defer c.cond.L.Unlock()
+	if c.discoveredServers[args.ServerId] == nil {
+		c.discoveredServers[args.ServerId] = &ServerNode{remoteIpPort: args.ServerAddr, client: client}
+	}
+	expectedServerId := c.currChainLen + 1
+	// Wait until the server is the next in the chain
+	for expectedServerId != args.ServerId {
+		c.cond.Wait()
+	}
+
+	// Assert serverId == expected
+	if args.ServerId != expectedServerId {
+		log.Println("Coord.Join: serverId != expectedServerId")
+		return errors.New("serverId:" + string(args.ServerId) + "!= expectedServerId:" + string(expectedServerId) + ", something went wrong")
+	}
+
+	log.Println("Coord.Join: server id added to chain:", args.ServerId)
+	c.currChainLen++
+
+	if c.currChainLen == 1 {
+		*reply = JoinReply{PrevServerAddress: ""}
+	} else {
+		prevServerId := c.currChainLen - 1
+		prevServerAddr := c.discoveredServers[prevServerId].remoteIpPort
+		*reply = JoinReply{PrevServerAddress: prevServerAddr}
+	}
+	return nil
+}
+
+type NodeRequest struct {
+	ClientId string
+	Token    tracing.TracingToken
+}
+
+type NodeReply struct {
+	NodeId uint8
+}
+
+func (c *Coord) GetHead(args NodeRequest, reply *NodeReply) error {
+	return errors.New("not implemented")
+}
+
+func (c *Coord) GetTail(args NodeRequest, reply *NodeReply) error {
 	return errors.New("not implemented")
 }
