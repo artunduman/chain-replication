@@ -19,8 +19,5 @@ func main() {
 		Secret:         config.Secret,
 	})
 	coord := chainedkv.Coord{}
-	err = coord.Start(config.ClientAPIListenAddr, config.ServerAPIListenAddr, config.LostMsgsThresh, config.NumServers, ctracer)
-	if err != nil {
-		log.Fatalf("Error starting coordinator: %s", err)
-	}
+	coord.Start(config.ClientAPIListenAddr, config.ServerAPIListenAddr, config.LostMsgsThresh, config.NumServers, ctracer)
 }

@@ -19,8 +19,5 @@ func main() {
 		Secret:         config.Secret,
 	})
 	server := chainedkv.Server{}
-	err = server.Start(config.ServerId, config.CoordAddr, config.ServerAddr, config.ServerListenAddr, config.ClientListenAddr, stracer)
-	if err != nil {
-		log.Fatalf("Error starting server: %s", err)
-	}
+	server.Start(config.ServerId, config.CoordAddr, config.ServerAddr, config.ServerListenAddr, config.ClientListenAddr, stracer)
 }
