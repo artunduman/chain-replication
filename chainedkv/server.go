@@ -244,12 +244,12 @@ func (s *Server) MakeTail(_, reply *bool) error {
 }
 
 type PutArgs struct {
-	Key      string
-	Value    string
-	ClientId string
-	GId      uint64
-	// TODO ClientAddr
-	Token *tracing.TracingToken
+	Key        string
+	Value      string
+	ClientId   string
+	GId        uint64
+	ClientAddr string
+	Token      *tracing.TracingToken
 }
 
 type PutReply struct {
@@ -274,9 +274,8 @@ func (s *Server) Put(args PutArgs, reply *PutReply) error {
 }
 
 type GetArgs struct {
-	Key string
-	GId uint64
-	// TODO ClientAddr
+	Key   string
+	GId   uint64
 	Token *tracing.TracingToken
 }
 

@@ -131,7 +131,8 @@ func (d *KVS) Put(tracer *tracing.Tracer, clientId string, key string, value str
 	// Ignore the output
 	err := d.headClient.Call(
 		"Server.Put",
-		chainedkv.PutArgs{Key: key, Value: value, ClientId: clientId, GId: rand.Uint64(), Token: nil},
+		// TODO determine client addr and reuse in receiveputresult
+		chainedkv.PutArgs{Key: key, Value: value, ClientId: clientId, ClientAddr: "", GId: rand.Uint64(), Token: nil},
 		&chainedkv.PutReply{},
 	) // TODO client.Go()
 	return 0, err
