@@ -225,11 +225,11 @@ func (s *Server) RegisterPrevServer(prevServerAddress string, reply *bool) error
 	*reply = true
 	return nil
 }
-func (s *Server) IsTail() bool {
+func (s *Server) isTail() bool {
 	return s.NextServer == nil
 }
 
-func (s *Server) IsHead() bool {
+func (s *Server) isHead() bool {
 	return s.PrevServer == nil
 }
 
@@ -249,10 +249,10 @@ type PutReply struct {
 func (s *Server) Put(args PutArgs, reply *PutReply) error {
 	log.Printf("Server.Put: Put %s:%s to server %d\n", args.Key, args.Value, s.Id)
 	// TODO server magic here
-	if s.IsHead() {
+	if s.isHead() {
 		// TODO do ordering
 	}
-	if s.IsTail() {
+	if s.isTail() {
 		// TODO Respond to client
 	} else {
 		err := s.NextServer.Call("Server.Put", args, reply) // Possibly .Go()?
@@ -274,7 +274,7 @@ type GetReply struct {
 }
 
 func (s *Server) Get(args GetArgs, reply *GetReply) error {
-	if !s.IsTail() {
+	if !s.isTail() {
 		return errors.New("Server.Get: not tail")
 	}
 	// TODO Return the value here

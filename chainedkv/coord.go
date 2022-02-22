@@ -137,12 +137,12 @@ func (c *Coord) Join(args JoinArgs, reply *JoinReply) error {
 	if c.discoveredServers[args.ServerId] == nil {
 		c.discoveredServers[args.ServerId] = &ServerNode{remoteIpPort: args.ServerAddr, client: client}
 	}
-	expectedServerId := c.currChainLen + 1
 	// Wait until the server is the next in the chain
-	for expectedServerId != args.ServerId {
+	for c.currChainLen+1 != args.ServerId {
 		c.cond.Wait()
 	}
 
+	expectedServerId := c.currChainLen + 1
 	// Assert serverId == expected
 	if args.ServerId != expectedServerId {
 		log.Println("Coord.Join: serverId != expectedServerId")
