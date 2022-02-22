@@ -167,14 +167,14 @@ type NodeRequest struct {
 	Token    tracing.TracingToken
 }
 
-type NodeReply struct {
-	NodeId uint8
+func (c *Coord) GetHead(args NodeRequest, reply *string) error {
+	// TODO check if coord is ready
+	*reply = c.discoveredServers[1].remoteIpPort
+	return nil
 }
 
-func (c *Coord) GetHead(args NodeRequest, reply *NodeReply) error {
-	return errors.New("not implemented")
-}
-
-func (c *Coord) GetTail(args NodeRequest, reply *NodeReply) error {
-	return errors.New("not implemented")
+func (c *Coord) GetTail(args NodeRequest, reply *string) error {
+	// TODO check if coord is ready
+	*reply = c.discoveredServers[c.currChainLen].remoteIpPort
+	return nil
 }

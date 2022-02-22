@@ -83,7 +83,7 @@ func (d *KVS) Start(localTracer *tracing.Tracer, clientId string, coordIPPort st
 		return nil, err
 	}
 	var headServerIPPort string
-	err = coordClient.Call("Coord.GetHead", localCoordIPPort, &headServerIPPort)
+	err = coordClient.Call("Coord.GetHead", chainedkv.NodeRequest{ClientId: clientId, Token: nil}, &headServerIPPort)
 	if err != nil {
 		log.Println("Error in getting head server:", err)
 		return nil, err
@@ -94,7 +94,7 @@ func (d *KVS) Start(localTracer *tracing.Tracer, clientId string, coordIPPort st
 		return nil, err
 	}
 	var tailServerIPPort string
-	err = coordClient.Call("Coord.GetTail", localCoordIPPort, &tailServerIPPort)
+	err = coordClient.Call("Coord.GetTail", chainedkv.NodeRequest{ClientId: clientId, Token: nil}, &tailServerIPPort)
 	if err != nil {
 		log.Println("Error in getting tail server:", err)
 		return nil, err

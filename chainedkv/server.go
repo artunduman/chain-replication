@@ -257,16 +257,18 @@ type PutReply struct {
 }
 
 func (s *Server) Put(args PutArgs, reply *PutReply) error {
+	log.Printf("Server.Put: Put %s:%s to server %d\n", args.Key, args.Value, s.Id)
 	// TODO server magic here
 	if s.IsHead {
 		// Ordering
 	} else if s.IsTail {
 		// Respond to client
-	}
-	// Recursively call next server
-	err := s.NextServer.Call("Server.Put", args, reply) // Possibly .Go()?
-	if err != nil {
-		return err
+	} else {
+		// Recursively call next server
+		err := s.NextServer.Call("Server.Put", args, reply) // Possibly .Go()?
+		if err != nil {
+			return err
+		}
 	}
 	return nil
 }
