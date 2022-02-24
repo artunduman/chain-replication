@@ -134,9 +134,7 @@ func (c *Coord) Join(args JoinArgs, reply *JoinReply) error {
 	// Lock the critical section
 	c.cond.L.Lock()
 	defer c.cond.L.Unlock()
-	if c.discoveredServers[args.ServerId] == nil {
-		c.discoveredServers[args.ServerId] = &ServerNode{remoteIpPort: args.ServerAddr, client: client}
-	}
+	c.discoveredServers[args.ServerId] = &ServerNode{remoteIpPort: args.ServerAddr, client: client}
 	// Wait until the server is the next in the chain
 	for c.currChainLen+1 != args.ServerId {
 		c.cond.Wait()
