@@ -1,9 +1,13 @@
 package kvslib
 
 import (
+	"cs.ubc.ca/cpsc416/a3/chainedkv"
+	"cs.ubc.ca/cpsc416/a3/util"
 	"errors"
-
 	"github.com/DistributedClocks/tracing"
+	"log"
+	"math/rand"
+	"net/rpc"
 )
 
 // Actions to be recorded by kvslib (as part of ktrace, put trace, get trace):
@@ -52,13 +56,18 @@ type ResultStruct struct {
 }
 
 type KVS struct {
-	notifyCh NotifyChannel
-	// Add more KVS instance state here.
+	notifyCh    NotifyChannel
+	coordClient *rpc.Client
+	headClient  *rpc.Client
+	tailClient  *rpc.Client
 }
 
 func NewKVS() *KVS {
 	return &KVS{
-		notifyCh: nil,
+		notifyCh:    nil,
+		coordClient: nil,
+		headClient:  nil,
+		tailClient:  nil,
 	}
 }
 
@@ -68,7 +77,38 @@ func NewKVS() *KVS {
 // factor at the client: the client will never have more than ChCapacity number of operations outstanding (pending concurrently) at any one time.
 // If there is an issue with connecting to the coord, this should return an appropriate err value, otherwise err should be set to nil.
 func (d *KVS) Start(localTracer *tracing.Tracer, clientId string, coordIPPort string, localCoordIPPort string, localHeadServerIPPort string, localTailServerIPPort string, chCapacity int) (NotifyChannel, error) {
-	return d.notifyCh, errors.New("not implemented")
+	coordClient, err := util.GetRPCClient(localCoordIPPort, coordIPPort)
+	if err != nil {
+		log.Println("Error in connecting to coord:", err)
+		return nil, err
+	}
+	var headServerIPPort string
+	err = coordClient.Call("Coord.GetHead", chainedkv.NodeRequest{ClientId: clientId, Token: nil}, &headServerIPPort)
+	if err != nil {
+		log.Println("Error in getting head server:", err)
+		return nil, err
+	}
+	headClient, err := util.GetRPCClient(localHeadServerIPPort, headServerIPPort)
+	if err != nil {
+		log.Println("Error in connecting to head server:", err)
+		return nil, err
+	}
+	var tailServerIPPort string
+	err = coordClient.Call("Coord.GetTail", chainedkv.NodeRequest{ClientId: clientId, Token: nil}, &tailServerIPPort)
+	if err != nil {
+		log.Println("Error in getting tail server:", err)
+		return nil, err
+	}
+	tailClient, err := util.GetRPCClient(localTailServerIPPort, tailServerIPPort)
+	if err != nil {
+		log.Println("Error in connecting to tail server:", err)
+		return nil, err
+	}
+	d.notifyCh = make(NotifyChannel, chCapacity)
+	d.coordClient = coordClient
+	d.headClient = headClient
+	d.tailClient = tailClient
+	return d.notifyCh, nil
 }
 
 // Get  non-blocking request from the client to make a get call for a given key.
@@ -87,12 +127,33 @@ func (d *KVS) Get(tracer *tracing.Tracer, clientId string, key string) (uint32, 
 // The value opId is used to identify this request and associate the returned value with this request.
 // The returned value must be delivered asynchronously via the notify-channel channel returned in the Start call.
 func (d *KVS) Put(tracer *tracing.Tracer, clientId string, key string, value string) (uint32, error) {
-	// Should return opId or error
-	return 0, errors.New("not implemented")
+	log.Printf("Client %s calling put on head server", clientId)
+	// Ignore the output
+	err := d.headClient.Call(
+		"Server.Put",
+		// TODO determine client addr and reuse in receiveputresult
+		chainedkv.PutArgs{Key: key, Value: value, ClientId: clientId, ClientAddr: "", GId: rand.Uint64(), Token: nil},
+		&chainedkv.PutReply{},
+	) // TODO client.Go()
+	return 0, err
+}
+
+type PutResultArgs struct {
+	OpId   uint32
+	GId    uint64
+	Result string
+}
+
+func (d *KVS) ReceivePutResult(args PutResultArgs, reply *bool) error {
+	return errors.New("not implemented")
 }
 
 // Stop Stops the KVS instance from communicating with the KVS and from delivering any results via the notify-channel.
 // This call always succeeds.
 func (d *KVS) Stop() {
-	return
+	d.headClient.Close()
+	d.tailClient.Close()
+	d.coordClient.Close()
+	newKVS := NewKVS()
+	*d = *newKVS
 }
