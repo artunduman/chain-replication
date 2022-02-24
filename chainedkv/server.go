@@ -1,7 +1,6 @@
 package chainedkv
 
 import (
-	"cs.ubc.ca/cpsc416/a3/util"
 	"errors"
 	"log"
 	"net"
@@ -9,6 +8,8 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+
+	"cs.ubc.ca/cpsc416/a3/util"
 
 	"github.com/DistributedClocks/tracing"
 )
@@ -130,6 +131,10 @@ type Server struct {
 	PrevServer *rpc.Client
 	Tracer     *tracing.Tracer
 	Coord      *rpc.Client
+}
+
+func NewServer() *Server {
+	return &Server{}
 }
 
 func (s *Server) Start(serverId uint8, coordAddr string, serverAddr string, serverListenAddr string, clientListenAddr string, strace *tracing.Tracer) error {

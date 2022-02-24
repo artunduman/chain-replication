@@ -81,6 +81,10 @@ type Coord struct {
 	cond              *sync.Cond
 }
 
+func NewCoord() *Coord {
+	return &Coord{}
+}
+
 func (c *Coord) Start(clientAPIListenAddr string, serverAPIListenAddr string, lostMsgsThresh uint8, numServers uint8, ctrace *tracing.Tracer) error {
 	c.discoveredServers = make(map[uint8]*ServerNode)
 	c.currChainLen = 0

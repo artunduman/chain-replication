@@ -1,13 +1,14 @@
 package kvslib
 
 import (
-	"cs.ubc.ca/cpsc416/a3/chainedkv"
-	"cs.ubc.ca/cpsc416/a3/util"
 	"errors"
-	"github.com/DistributedClocks/tracing"
 	"log"
 	"math/rand"
 	"net/rpc"
+
+	"cs.ubc.ca/cpsc416/a3/chainedkv"
+	"cs.ubc.ca/cpsc416/a3/util"
+	"github.com/DistributedClocks/tracing"
 )
 
 // Actions to be recorded by kvslib (as part of ktrace, put trace, get trace):
@@ -44,6 +45,24 @@ type GetResultRecvd struct {
 	GId   uint64
 	Key   string
 	Value string
+}
+
+type HeadReq struct {
+	ClientId string
+}
+
+type HeadResRecvd struct {
+	ClientId string
+	ServerId uint8
+}
+
+type TailReq struct {
+	ClientId string
+}
+
+type TailResRecvd struct {
+	ClientId string
+	ServerId uint8
 }
 
 // NotifyChannel is used for notifying the client about a mining result.
