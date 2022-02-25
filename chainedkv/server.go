@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/rpc"
 	"strconv"
+	"sync"
 
 	fchecker "cs.ubc.ca/cpsc416/a3/fcheck"
 	"cs.ubc.ca/cpsc416/a3/util"
@@ -133,6 +134,7 @@ type Server struct {
 	Coord      *rpc.Client
 	KVS        map[string]string
 	CurGId     uint64
+	mu         sync.Mutex
 }
 
 type RegisterServerArgs struct {
@@ -340,6 +342,9 @@ func (s *Server) putTail(trace *tracing.Trace, args PutArgs, reply *interface{})
 }
 
 func (s *Server) Put(args PutArgs, reply *interface{}) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	trace := s.Tracer.ReceiveToken(args.Token)
 
 	s.KVS[args.Key] = args.Value
@@ -368,6 +373,9 @@ func (s *Server) Put(args PutArgs, reply *interface{}) error {
 }
 
 func (s *Server) Get(args GetArgs, reply *GetReply) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	if !s.isTail() {
 		return errors.New("Server.Get: not tail")
 	}
