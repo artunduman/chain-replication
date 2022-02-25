@@ -1,6 +1,9 @@
 package util
 
-import "net"
+import (
+	"net"
+	"net/rpc"
+)
 
 func GetFreeUDPPort(addrIp string) (int, error) {
 	ipPort, err := net.ResolveUDPAddr(
@@ -20,4 +23,26 @@ func GetFreeUDPPort(addrIp string) (int, error) {
 
 	defer l.Close()
 	return l.LocalAddr().(*net.UDPAddr).Port, nil
+}
+
+func GetRPCClient(localAddr string, remoteAddr string) (*rpc.Client, error) {
+	laddr, err := net.ResolveTCPAddr("tcp", localAddr)
+
+	if err != nil {
+		return nil, err
+	}
+
+	raddr, err := net.ResolveTCPAddr("tcp", remoteAddr)
+
+	if err != nil {
+		return nil, err
+	}
+
+	conn, err := net.DialTCP("tcp", laddr, raddr)
+
+	if err != nil {
+		return nil, err
+	}
+
+	return rpc.NewClient(conn), nil
 }
