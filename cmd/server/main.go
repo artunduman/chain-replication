@@ -1,10 +1,11 @@
 package main
 
 import (
+	"log"
+
 	"cs.ubc.ca/cpsc416/a3/chainedkv"
 	"cs.ubc.ca/cpsc416/a3/util"
 	"github.com/DistributedClocks/tracing"
-	"log"
 )
 
 func main() {
@@ -18,6 +19,6 @@ func main() {
 		TracerIdentity: config.TracingIdentity,
 		Secret:         config.Secret,
 	})
-	server := chainedkv.Server{}
+	server := chainedkv.NewServer()
 	server.Start(config.ServerId, config.CoordAddr, config.ServerAddr, config.ServerListenAddr, config.ClientListenAddr, stracer)
 }

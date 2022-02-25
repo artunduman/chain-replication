@@ -1,13 +1,14 @@
 package kvslib
 
 import (
-	"cs.ubc.ca/cpsc416/a3/chainedkv"
-	"cs.ubc.ca/cpsc416/a3/util"
 	"errors"
-	"github.com/DistributedClocks/tracing"
 	"log"
 	"math/rand"
 	"net/rpc"
+
+	"cs.ubc.ca/cpsc416/a3/chainedkv"
+	"cs.ubc.ca/cpsc416/a3/util"
+	"github.com/DistributedClocks/tracing"
 )
 
 // Actions to be recorded by kvslib (as part of ktrace, put trace, get trace):
@@ -44,6 +45,24 @@ type GetResultRecvd struct {
 	GId   uint64
 	Key   string
 	Value string
+}
+
+type HeadReq struct {
+	ClientId string
+}
+
+type HeadResRecvd struct {
+	ClientId string
+	ServerId uint8
+}
+
+type TailReq struct {
+	ClientId string
+}
+
+type TailResRecvd struct {
+	ClientId string
+	ServerId uint8
 }
 
 // NotifyChannel is used for notifying the client about a mining result.
@@ -133,18 +152,12 @@ func (d *KVS) Put(tracer *tracing.Tracer, clientId string, key string, value str
 		"Server.Put",
 		// TODO determine client addr and reuse in receiveputresult
 		chainedkv.PutArgs{Key: key, Value: value, ClientId: clientId, ClientAddr: "", GId: rand.Uint64(), Token: nil},
-		&chainedkv.PutReply{},
+		nil,
 	) // TODO client.Go()
 	return 0, err
 }
 
-type PutResultArgs struct {
-	OpId   uint32
-	GId    uint64
-	Result string
-}
-
-func (d *KVS) ReceivePutResult(args PutResultArgs, reply *bool) error {
+func (d *KVS) ReceivePutResult(args chainedkv.PutResultArgs, reply *bool) error {
 	return errors.New("not implemented")
 }
 
