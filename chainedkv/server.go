@@ -2,9 +2,12 @@ package chainedkv
 
 import (
 	"errors"
+	"fmt"
 	"net"
 	"net/rpc"
+	"strconv"
 
+	fchecker "cs.ubc.ca/cpsc416/a3/fcheck"
 	"cs.ubc.ca/cpsc416/a3/util"
 
 	"github.com/DistributedClocks/tracing"
@@ -172,7 +175,8 @@ func NewServer() *Server {
 	return &Server{}
 }
 
-func (s *Server) Start(serverId uint8, coordAddr string, serverAddr string, serverListenAddr string, clientListenAddr string, strace *tracing.Tracer) error {
+func (s *Server) Start(serverId uint8, coordAddr string, serverAddr string,
+	serverListenAddr string, clientListenAddr string, strace *tracing.Tracer) error {
 	var coordJoinReply JoinReply
 	var serverRegReply tracing.TracingToken
 
@@ -252,10 +256,19 @@ func (s *Server) Start(serverId uint8, coordAddr string, serverAddr string, serv
 		}
 
 		s.Trace = s.Tracer.ReceiveToken(serverRegReply)
-		s.Trace.RecordAction(ServerJoined{s.Id})
-
-		// TODO send `Joined` reply to Coord
 	}
+
+	s.Trace.RecordAction(ServerJoined{s.Id})
+
+	ackIpPort, err := s.startFcheck(serverAddr)
+
+	if err != nil {
+		return err
+	}
+
+	fmt.Println("TODO", ackIpPort)
+
+	// TODO send `Joined` reply to Coord
 
 	go rpc.Accept(clientListener)
 	rpc.Accept(serverListener)
@@ -371,4 +384,34 @@ func (s *Server) Get(args GetArgs, reply *GetReply) error {
 	reply.Token = trace.GenerateToken()
 
 	return nil
+}
+
+func (s *Server) startFcheck(serverAddr string) (string, error) {
+	serverAddrIp, _, err := net.SplitHostPort(serverAddr)
+
+	if err != nil {
+		return "", err
+	}
+
+	port, err := util.GetFreeUDPPort(serverAddrIp)
+
+	if err != nil {
+		return "", err
+	}
+
+	ackIpPort, err := net.ResolveUDPAddr(
+		"udp",
+		net.JoinHostPort(serverAddrIp, strconv.Itoa(port)),
+	)
+
+	if err != nil {
+		return "", err
+	}
+
+	// Start fcheck ACK
+	fchecker.Start(fchecker.StartStruct{
+		AckLocalIPAckLocalPort: ackIpPort.String(),
+	})
+
+	return ackIpPort.String(), nil
 }
