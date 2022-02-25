@@ -124,7 +124,7 @@ type JoinArgs struct {
 }
 
 type JoinReply struct {
-	PrevServerAddress string
+	PrevServerAddress *string
 }
 
 func (c *Coord) Join(args JoinArgs, reply *JoinReply) error {
@@ -155,11 +155,11 @@ func (c *Coord) Join(args JoinArgs, reply *JoinReply) error {
 	c.currChainLen++
 
 	if c.currChainLen == 1 {
-		*reply = JoinReply{PrevServerAddress: ""}
+		*reply = JoinReply{PrevServerAddress: nil}
 	} else {
 		prevServerId := c.currChainLen - 1
 		prevServerAddr := c.discoveredServers[prevServerId].remoteIpPort
-		*reply = JoinReply{PrevServerAddress: prevServerAddr}
+		*reply = JoinReply{PrevServerAddress: &prevServerAddr}
 	}
 	c.cond.Broadcast()
 	return nil

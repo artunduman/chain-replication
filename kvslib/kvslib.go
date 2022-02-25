@@ -152,18 +152,12 @@ func (d *KVS) Put(tracer *tracing.Tracer, clientId string, key string, value str
 		"Server.Put",
 		// TODO determine client addr and reuse in receiveputresult
 		chainedkv.PutArgs{Key: key, Value: value, ClientId: clientId, ClientAddr: "", GId: rand.Uint64(), Token: nil},
-		&chainedkv.PutReply{},
+		nil,
 	) // TODO client.Go()
 	return 0, err
 }
 
-type PutResultArgs struct {
-	OpId   uint32
-	GId    uint64
-	Result string
-}
-
-func (d *KVS) ReceivePutResult(args PutResultArgs, reply *bool) error {
+func (d *KVS) ReceivePutResult(args chainedkv.PutResultArgs, reply *bool) error {
 	return errors.New("not implemented")
 }
 
