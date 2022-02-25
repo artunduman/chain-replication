@@ -75,6 +75,18 @@ type ServerNode struct {
 	client       *rpc.Client
 }
 
+type NodeRequest struct {
+	ClientId string
+	Token    tracing.TracingToken
+}
+
+type NodeResponse struct {
+	ClientId     string
+	ServerId     uint8
+	ServerIpPort string
+	Token        tracing.TracingToken
+}
+
 type Coord struct {
 	currChainLen      uint8
 	discoveredServers map[uint8]*ServerNode
@@ -165,19 +177,20 @@ func (c *Coord) Join(args JoinArgs, reply *JoinReply) error {
 	return nil
 }
 
-type NodeRequest struct {
-	ClientId string
-	Token    tracing.TracingToken
-}
-
-func (c *Coord) GetHead(args NodeRequest, reply *string) error {
+func (c *Coord) GetHead(args NodeRequest, reply *NodeResponse) error {
 	// TODO check if coord is ready
-	*reply = c.discoveredServers[1].remoteIpPort
+	reply.ClientId = args.ClientId
+	reply.ServerId = 1 // TODO deterministically return server id
+	reply.ServerIpPort = c.discoveredServers[1].remoteIpPort
+	reply.Token = args.Token
 	return nil
 }
 
-func (c *Coord) GetTail(args NodeRequest, reply *string) error {
+func (c *Coord) GetTail(args NodeRequest, reply *NodeResponse) error {
 	// TODO check if coord is ready
-	*reply = c.discoveredServers[c.currChainLen].remoteIpPort
+	reply.ClientId = args.ClientId
+	reply.ServerId = c.currChainLen // TODO deterministically return server id
+	reply.ServerIpPort = c.discoveredServers[c.currChainLen].remoteIpPort
+	reply.Token = args.Token
 	return nil
 }

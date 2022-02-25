@@ -2,6 +2,7 @@ package main
 
 import (
 	"log"
+	"time"
 
 	"cs.ubc.ca/cpsc416/a3/chainedkv"
 	"cs.ubc.ca/cpsc416/a3/kvslib"
@@ -25,8 +26,10 @@ func main() {
 	util.CheckErr(err, "Error reading client config: %v\n", err)
 
 	// Put a key-value pair
-	op, err := client.Put(tracer, "clientID1", "key2", "value2")
+	op, err := client.Put(tracer, "clientID1", "key1", "value1")
 	util.CheckErr(err, "Error putting value %v, opId: %v\b", err, op)
+
+	time.Sleep(5)
 
 	// Get a key's value
 	op, err = client.Get(tracer, "clientID1", "key1")

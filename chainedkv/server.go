@@ -153,23 +153,23 @@ type PutArgs struct {
 	Token      tracing.TracingToken
 }
 
-type PutResultArgs struct {
-	OpId  uint32
-	GId   uint64
-	Value string
-	Token tracing.TracingToken
-}
+type PutResultArgs Reply
 
 type GetArgs struct {
-	ClientId string
-	OpId     uint32
-	Key      string
-	Token    tracing.TracingToken
+	ClientId   string
+	OpId       uint32
+	Key        string
+	ClientAddr string
+	Token      tracing.TracingToken
 }
 
-type GetReply struct {
-	Value string
+type GetReply Reply
+
+type Reply struct {
+	OpId  uint32
 	GId   uint64
+	Key   string
+	Value string
 	Token tracing.TracingToken
 }
 
@@ -327,6 +327,7 @@ func (s *Server) putTail(trace *tracing.Trace, args PutArgs, reply *interface{})
 
 	putResultArgs.GId = args.GId
 	putResultArgs.OpId = args.OpId
+	putResultArgs.Key = args.Key
 	putResultArgs.Value = args.Value
 
 	trace.RecordAction(PutResult{args.ClientId, args.OpId, args.GId, args.Key, args.Value})
@@ -372,7 +373,9 @@ func (s *Server) Put(args PutArgs, reply *interface{}) error {
 	return s.putFwd(trace, args, reply)
 }
 
-func (s *Server) Get(args GetArgs, reply *GetReply) error {
+func (s *Server) Get(args GetArgs, reply *interface{}) error {
+	var getReply GetReply
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -383,13 +386,25 @@ func (s *Server) Get(args GetArgs, reply *GetReply) error {
 	trace := s.Tracer.ReceiveToken(args.Token)
 	trace.RecordAction(GetRecvd{args.ClientId, args.OpId, args.Key})
 
-	reply.GId = s.CurGId
-	trace.RecordAction(GetOrdered{args.ClientId, args.OpId, reply.GId, args.Key})
+	client, err := rpc.Dial("tcp", args.ClientAddr)
 
-	reply.Value = s.KVS[args.Key]
-	trace.RecordAction(GetResult{args.ClientId, args.OpId, reply.GId, args.Key, reply.Value})
+	if err != nil {
+		return err
+	}
 
-	reply.Token = trace.GenerateToken()
+	getReply.GId = s.CurGId
+	getReply.OpId = args.OpId
+	getReply.Key = args.Key
+	getReply.Value = s.KVS[args.Key]
+
+	trace.RecordAction(PutResult{args.ClientId, args.OpId, getReply.GId, args.Key, getReply.Value})
+
+	getReply.Token = trace.GenerateToken()
+	err = client.Call("KVS.ReceiveGetResult", getReply, nil)
+
+	if err != nil {
+		return err
+	}
 
 	return nil
 }
