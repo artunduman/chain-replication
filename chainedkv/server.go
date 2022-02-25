@@ -301,7 +301,7 @@ func (s *Server) isHead() bool {
 	return s.PrevServer == nil
 }
 
-func (s *Server) putFwd(trace *tracing.Trace, args PutArgs, reply interface{}) error {
+func (s *Server) putFwd(trace *tracing.Trace, args PutArgs, reply *interface{}) error {
 	trace.RecordAction(PutFwd{args.ClientId, args.OpId, args.GId, args.Key, args.Value})
 
 	args.Token = trace.GenerateToken()
@@ -314,7 +314,7 @@ func (s *Server) putFwd(trace *tracing.Trace, args PutArgs, reply interface{}) e
 	return nil
 }
 
-func (s *Server) putTail(trace *tracing.Trace, args PutArgs, reply interface{}) error {
+func (s *Server) putTail(trace *tracing.Trace, args PutArgs, reply *interface{}) error {
 	var putResultArgs PutResultArgs
 
 	client, err := rpc.Dial("tcp", args.ClientAddr)
@@ -339,7 +339,7 @@ func (s *Server) putTail(trace *tracing.Trace, args PutArgs, reply interface{}) 
 	return nil
 }
 
-func (s *Server) Put(args PutArgs, reply interface{}) error {
+func (s *Server) Put(args PutArgs, reply *interface{}) error {
 	trace := s.Tracer.ReceiveToken(args.Token)
 
 	s.KVS[args.Key] = args.Value
@@ -361,7 +361,7 @@ func (s *Server) Put(args PutArgs, reply interface{}) error {
 	trace.RecordAction(PutFwdRecvd{args.ClientId, args.OpId, args.GId, args.Key, args.Value})
 
 	if s.isTail() {
-		s.putTail(trace, args, reply)
+		return s.putTail(trace, args, reply)
 	}
 
 	return s.putFwd(trace, args, reply)
