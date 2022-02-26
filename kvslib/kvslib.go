@@ -142,7 +142,6 @@ func (d *KVS) Start(localTracer *tracing.Tracer, clientId string, coordIPPort st
 	var trace *tracing.Trace
 	var headServResp chainedkv.NodeResponse
 	var tailServResp chainedkv.NodeResponse
-	var clientIp string
 
 	trace = localTracer.CreateTrace()
 
@@ -222,14 +221,13 @@ func (d *KVS) Start(localTracer *tracing.Tracer, clientId string, coordIPPort st
 		return nil, err
 	}
 
-	clientIp = util.GetPreferredOutboundIp().String()
-	port, err := util.GetFreeTCPPort(clientIp)
+	port, err := util.GetFreeTCPPort(localTailServerIPPort)
 	if err != nil {
 		log.Println("kvslib.Start() - Error in obtaining local client ip: ", err)
 		return nil, err
 	}
 
-	d.Data.ClientIpPort = net.JoinHostPort(clientIp, strconv.Itoa(port))
+	d.Data.ClientIpPort = net.JoinHostPort(localTailServerIPPort, strconv.Itoa(port))
 	tcpAddrClient, err := net.ResolveTCPAddr("tcp", d.Data.ClientIpPort)
 	if err != nil {
 		log.Println("kvslib.Start() - Error in resolving local client ip: ", err)
@@ -390,6 +388,8 @@ func (d *KVS) NewTailServer(serverArgs ServerArgs, reply *interface{}) error {
 	d.Mutex.Lock()
 	defer d.Mutex.Unlock()
 
+	d.RpcClients.TailClient.Close()
+
 	// Obtain tail server info
 	d.Data.TailServerInfo.ServerId = serverArgs.ServerId
 	d.Data.TailServerInfo.RemotePortIp = serverArgs.ServerIpPort
@@ -424,6 +424,8 @@ func (d *KVS) NewHeadServer(serverArgs ServerArgs, reply *interface{}) error {
 	d.Mutex.Lock()
 	defer d.Mutex.Unlock()
 
+	d.RpcClients.HeadClient.Close()
+
 	// Obtain tail server info
 	d.Data.HeadServerInfo.ServerId = serverArgs.ServerId
 	d.Data.HeadServerInfo.RemotePortIp = serverArgs.ServerIpPort
@@ -456,9 +458,16 @@ func (d *KVS) NewHeadServer(serverArgs ServerArgs, reply *interface{}) error {
 // Stop Stops the KVS instance from communicating with the KVS and from delivering any results via the notify-channel.
 // This call always succeeds.
 func (d *KVS) Stop() {
+	// Reserve critical section
+	d.Mutex.Lock()
+	defer d.Mutex.Unlock()
+
+	d.Data.Tracer.CreateTrace().RecordAction(KvslibStop{ClientId: d.Data.ClientId})
+
 	d.RpcClients.HeadClient.Close()
 	d.RpcClients.TailClient.Close()
 	d.RpcClients.CoordClient.Close()
+
 	newKVS := NewKVS()
 	*d = *newKVS
 }
