@@ -259,10 +259,6 @@ func (d *KVS) Get(tracer *tracing.Tracer, clientId string, key string) (uint32, 
 	d.Mutex.Lock()
 	defer d.Mutex.Unlock()
 
-	d.Data.Tracer = tracer
-	trace = tracer.CreateTrace()
-	opId = d.State.CurrOpId
-
 	// Verify capacity hasn't been exceeded
 	if d.State.ChCount > d.Data.ChCapacity {
 		err := errors.New("concurrency capacity has been exceeded")
@@ -270,9 +266,13 @@ func (d *KVS) Get(tracer *tracing.Tracer, clientId string, key string) (uint32, 
 		return 0, err
 	}
 
-	getArgs = chainedkv.GetArgs{ClientId: clientId, OpId: opId, Key: key, ClientAddr: d.Data.ClientIpPort, Token: trace.GenerateToken()}
+	d.Data.Tracer = tracer
+	trace = tracer.CreateTrace()
+	opId = d.State.CurrOpId
 
 	trace.RecordAction(Get{ClientId: clientId, OpId: opId, Key: key})
+
+	getArgs = chainedkv.GetArgs{ClientId: clientId, OpId: opId, Key: key, ClientAddr: d.Data.ClientIpPort, Token: trace.GenerateToken()}
 
 	// Invoke Get
 	cbCall := d.RpcClients.TailClient.Go(
@@ -309,10 +309,6 @@ func (d *KVS) Put(tracer *tracing.Tracer, clientId string, key string, value str
 	d.Mutex.Lock()
 	defer d.Mutex.Unlock()
 
-	d.Data.Tracer = tracer
-	trace = tracer.CreateTrace()
-	opId = d.State.CurrOpId
-
 	// Verify capacity hasn't been exceeded
 	if d.State.ChCount > d.Data.ChCapacity {
 		err := errors.New("concurrency capacity has been exceeded")
@@ -320,9 +316,13 @@ func (d *KVS) Put(tracer *tracing.Tracer, clientId string, key string, value str
 		return 0, err
 	}
 
-	putArgs = chainedkv.PutArgs{ClientId: clientId, OpId: opId, Key: key, Value: value, ClientAddr: d.Data.ClientIpPort, Token: trace.GenerateToken()}
+	d.Data.Tracer = tracer
+	trace = tracer.CreateTrace()
+	opId = d.State.CurrOpId
 
 	trace.RecordAction(Put{ClientId: clientId, OpId: opId, Key: key, Value: value})
+
+	putArgs = chainedkv.PutArgs{ClientId: clientId, OpId: opId, Key: key, Value: value, ClientAddr: d.Data.ClientIpPort, Token: trace.GenerateToken()}
 
 	// Invoke Put
 	cbCall := d.RpcClients.HeadClient.Go(
@@ -360,6 +360,7 @@ func (d *KVS) ReceiveGetResult(args chainedkv.GetReply, reply *interface{}) erro
 	// Update state
 	d.State.ChCount -= 1
 	d.State.GetOpId = util.RemoveUInt32(d.State.GetOpId, args.OpId)
+	delete(d.State.OpIdToCalls, args.OpId)
 
 	return nil
 }
@@ -378,7 +379,8 @@ func (d *KVS) ReceivePutResult(args chainedkv.PutResultArgs, reply *interface{})
 
 	// Update state
 	d.State.ChCount -= 1
-	d.State.PutOpId = util.RemoveUInt32(d.State.GetOpId, args.OpId)
+	d.State.PutOpId = util.RemoveUInt32(d.State.PutOpId, args.OpId)
+	delete(d.State.OpIdToCalls, args.OpId)
 
 	return nil
 }

@@ -1,27 +1,9 @@
 package util
 
 import (
-	"log"
 	"net"
 	"net/rpc"
 )
-
-const (
-	MAX_SERVER_COUNT = 16
-)
-
-func GetPreferredOutboundIp() net.IP {
-	conn, err := net.Dial("udp", "8.8.8.8:80")
-
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer conn.Close()
-
-	localAddr := conn.LocalAddr().(*net.UDPAddr)
-
-	return localAddr.IP
-}
 
 func GetFreeTCPPort(addrIp string) (int, error) {
 	ipPort, err := net.ResolveTCPAddr(
