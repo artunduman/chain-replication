@@ -173,6 +173,11 @@ type Reply struct {
 	Token tracing.TracingToken
 }
 
+type ServerArgs struct {
+	ServerId     uint8
+	ServerIpPort string
+}
+
 func NewServer() *Server {
 	return &Server{}
 }

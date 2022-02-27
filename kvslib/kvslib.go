@@ -76,13 +76,6 @@ type ResultStruct struct {
 	Result string
 }
 
-// RPC
-
-type ServerArgs struct {
-	ServerId     uint8
-	ServerIpPort string
-}
-
 // Local
 
 type KVS struct {
@@ -392,7 +385,7 @@ func (d *KVS) ReceivePutResult(args chainedkv.PutResultArgs, reply *interface{})
 	return nil
 }
 
-func (d *KVS) NewTailServer(serverArgs ServerArgs, reply *interface{}) error {
+func (d *KVS) NewTailServer(serverArgs chainedkv.ServerArgs, reply *interface{}) error {
 	// Reserve critical section
 	d.Mutex.Lock()
 	defer d.Mutex.Unlock()
@@ -428,7 +421,7 @@ func (d *KVS) NewTailServer(serverArgs ServerArgs, reply *interface{}) error {
 	return nil
 }
 
-func (d *KVS) NewHeadServer(serverArgs ServerArgs, reply *interface{}) error {
+func (d *KVS) NewHeadServer(serverArgs chainedkv.ServerArgs, reply *interface{}) error {
 	// Reserve critical section
 	d.Mutex.Lock()
 	defer d.Mutex.Unlock()
