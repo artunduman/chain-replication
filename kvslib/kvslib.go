@@ -78,10 +78,10 @@ type ResultStruct struct {
 // Local
 
 type KVS struct {
-	Mutex      *sync.Mutex
-	NotifyCh   NotifyChannel
-	RpcClients RPCClients
-	Data       LocalData
+	Mutex    *sync.Mutex
+	NotifyCh NotifyChannel
+	Clients  RPCClients
+	Data     LocalData
 }
 
 type RPCClients struct {
@@ -123,10 +123,10 @@ type LocalData struct {
 
 func NewKVS() *KVS {
 	return &KVS{
-		Mutex:      &sync.Mutex{},
-		NotifyCh:   nil,
-		RpcClients: RPCClients{},
-		Data:       LocalData{},
+		Mutex:    &sync.Mutex{},
+		NotifyCh: nil,
+		Clients:  RPCClients{},
+		Data:     LocalData{},
 	}
 }
 
@@ -198,14 +198,14 @@ func (d *KVS) Start(localTracer *tracing.Tracer, clientId string, coordIPPort st
 	go rpc.Accept(d.Data.Listener)
 
 	// Connect to RPC clients
-	d.RpcClients.CoordClient, err = util.GetRPCClient(localCoordIPPort, coordIPPort)
+	d.Clients.CoordClient, err = util.GetRPCClient(localCoordIPPort, coordIPPort)
 
 	if err != nil {
 		return nil, err
 	}
 
 	var test interface{}
-	err = d.RpcClients.CoordClient.Call(
+	err = d.Clients.CoordClient.Call(
 		"Coord.ClientJoin",
 		chainedkv.ClientRequest{ClientId: clientId, ClientIpPort: d.Data.ClientIPPort},
 		&test,
@@ -225,7 +225,7 @@ func (d *KVS) Start(localTracer *tracing.Tracer, clientId string, coordIPPort st
 	d.Data.HeadServerInfo.LocalPortIp = localHeadServerIPPort
 	d.Data.HeadServerInfo.RemotePortIp = servResp.ServerIpPort
 
-	d.RpcClients.HeadClient, err = util.GetRPCClient(localHeadServerIPPort, servResp.ServerIpPort)
+	d.Clients.HeadClient, err = util.GetRPCClient(localHeadServerIPPort, servResp.ServerIpPort)
 
 	if err != nil {
 		return nil, err
@@ -241,7 +241,7 @@ func (d *KVS) Start(localTracer *tracing.Tracer, clientId string, coordIPPort st
 	d.Data.TailServerInfo.LocalPortIp = localTailServerIPPort
 	d.Data.TailServerInfo.RemotePortIp = servResp.ServerIpPort
 
-	d.RpcClients.TailClient, err = util.GetRPCClient(localTailServerIPPort, servResp.ServerIpPort)
+	d.Clients.TailClient, err = util.GetRPCClient(localTailServerIPPort, servResp.ServerIpPort)
 
 	if err != nil {
 		return nil, err
@@ -282,7 +282,7 @@ func (d *KVS) Get(tracer *tracing.Tracer, clientId string, key string) (uint32, 
 	}
 
 	// Invoke Get
-	d.RpcClients.TailClient.Go(
+	d.Clients.TailClient.Go(
 		"Server.Get",
 		getArgs,
 		&getReply,
@@ -334,7 +334,7 @@ func (d *KVS) Put(tracer *tracing.Tracer, clientId string, key string, value str
 	}
 
 	// Invoke Put
-	d.RpcClients.HeadClient.Go(
+	d.Clients.HeadClient.Go(
 		"Server.Put",
 		putArgs,
 		&putReply,
@@ -431,7 +431,7 @@ func (d *KVS) resendGetRequest(call *rpc.Call) {
 
 	if tailServResp.ServerId == d.Data.TailServerInfo.ServerId {
 		// Tail hasn't changed, resend data through existing RPC client
-		d.RpcClients.TailClient.Go(
+		d.Clients.TailClient.Go(
 			"Server.Get",
 			call.Args,
 			&getReply,
@@ -442,22 +442,22 @@ func (d *KVS) resendGetRequest(call *rpc.Call) {
 		d.Data.TailServerInfo.ServerId = tailServResp.ServerId
 		d.Data.TailServerInfo.RemotePortIp = tailServResp.ServerIpPort
 
-		d.RpcClients.TailClient.Close()
+		d.Clients.TailClient.Close()
 
-		d.RpcClients.TailClient, _ = util.GetRPCClient(
+		d.Clients.TailClient, _ = util.GetRPCClient(
 			d.Data.TailServerInfo.LocalPortIp,
 			tailServResp.ServerIpPort,
 		)
 
-		for opId, getArgs := range d.Data.PendingGetRequests {
-			d.RpcClients.TailClient.Go(
+		for opId, getRequests := range d.Data.PendingGetRequests {
+			d.Clients.TailClient.Go(
 				"Server.Get",
 				chainedkv.GetArgs{
 					ClientId:   d.Data.ClientId,
 					OpId:       opId,
-					Key:        getArgs.Key,
+					Key:        getRequests.Key,
 					ClientAddr: d.Data.ClientIPPort,
-					Token:      getArgs.Trace.GenerateToken(),
+					Token:      getRequests.Trace.GenerateToken(),
 				},
 				&getReply,
 				d.Data.DoneCh,
@@ -477,7 +477,7 @@ func (d *KVS) resendPutRequest(call *rpc.Call) {
 
 	if headServResp.ServerId == d.Data.HeadServerInfo.ServerId {
 		// Head hasn't changed, resend data through existing RPC client
-		d.RpcClients.HeadClient.Go(
+		d.Clients.HeadClient.Go(
 			"Server.Put",
 			call.Args,
 			&putReply,
@@ -488,23 +488,23 @@ func (d *KVS) resendPutRequest(call *rpc.Call) {
 		d.Data.HeadServerInfo.ServerId = headServResp.ServerId
 		d.Data.HeadServerInfo.RemotePortIp = headServResp.ServerIpPort
 
-		d.RpcClients.HeadClient.Close()
+		d.Clients.HeadClient.Close()
 
-		d.RpcClients.HeadClient, _ = util.GetRPCClient(
+		d.Clients.HeadClient, _ = util.GetRPCClient(
 			d.Data.HeadServerInfo.LocalPortIp,
 			headServResp.ServerIpPort,
 		)
 
-		for opId, putArgs := range d.Data.PendingPutRequests {
-			d.RpcClients.HeadClient.Go(
+		for opId, putRequests := range d.Data.PendingPutRequests {
+			d.Clients.HeadClient.Go(
 				"Server.Put",
 				chainedkv.PutArgs{
 					ClientId:   d.Data.ClientId,
 					OpId:       opId,
-					Key:        putArgs.Key,
-					Value:      putArgs.Value,
+					Key:        putRequests.Key,
+					Value:      putRequests.Value,
 					ClientAddr: d.Data.ClientIPPort,
-					Token:      putArgs.Trace.GenerateToken(),
+					Token:      putRequests.Trace.GenerateToken(),
 				},
 				&putReply,
 				d.Data.DoneCh,
@@ -516,11 +516,11 @@ func (d *KVS) resendPutRequest(call *rpc.Call) {
 func (d *KVS) getHead(servResp *chainedkv.NodeResponse) error {
 	d.Data.Trace.RecordAction(HeadReq{ClientId: d.Data.ClientId})
 
-	err := d.RpcClients.CoordClient.Call(
+	err := d.Clients.CoordClient.Call(
 		"Coord.GetHead",
 		chainedkv.NodeRequest{
 			ClientId: d.Data.ClientId,
-			Token:    nil,
+			Token:    d.Data.Trace.GenerateToken(),
 		},
 		servResp,
 	)
@@ -529,6 +529,7 @@ func (d *KVS) getHead(servResp *chainedkv.NodeResponse) error {
 		return err
 	}
 
+	d.Data.Trace = d.Data.Tracer.ReceiveToken(servResp.Token)
 	d.Data.Trace.RecordAction(
 		HeadResRecvd{
 			ClientId: d.Data.ClientId,
@@ -542,11 +543,11 @@ func (d *KVS) getHead(servResp *chainedkv.NodeResponse) error {
 func (d *KVS) getTail(servResp *chainedkv.NodeResponse) error {
 	d.Data.Trace.RecordAction(TailReq{ClientId: d.Data.ClientId})
 
-	err := d.RpcClients.CoordClient.Call(
+	err := d.Clients.CoordClient.Call(
 		"Coord.GetTail",
 		chainedkv.NodeRequest{
 			ClientId: d.Data.ClientId,
-			Token:    nil,
+			Token:    d.Data.Trace.GenerateToken(),
 		},
 		servResp,
 	)
@@ -555,6 +556,7 @@ func (d *KVS) getTail(servResp *chainedkv.NodeResponse) error {
 		return err
 	}
 
+	d.Data.Trace = d.Data.Tracer.ReceiveToken(servResp.Token)
 	d.Data.Trace.RecordAction(
 		TailResRecvd{
 			ClientId: d.Data.ClientId,
@@ -575,7 +577,7 @@ func (d *KVS) Stop() {
 
 	d.Data.Trace.RecordAction(KvslibStop{ClientId: d.Data.ClientId})
 
-	d.RpcClients.CoordClient.Call(
+	d.Clients.CoordClient.Call(
 		"Coord.ClientLeave",
 		chainedkv.ClientRequest{
 			ClientId:     d.Data.ClientId,
@@ -584,9 +586,9 @@ func (d *KVS) Stop() {
 		&clientLeaveReply,
 	)
 
-	d.RpcClients.HeadClient.Close()
-	d.RpcClients.TailClient.Close()
-	d.RpcClients.CoordClient.Close()
+	d.Clients.HeadClient.Close()
+	d.Clients.TailClient.Close()
+	d.Clients.CoordClient.Close()
 	d.Data.Listener.Close()
 	d.Data.TerminateDoneCh <- true
 
