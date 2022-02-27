@@ -116,11 +116,10 @@ type LocalData struct {
 }
 
 type LocalState struct {
-	CurrOpId    uint32
-	ChCount     int
-	GetOpId     []uint32
-	PutOpId     []uint32
-	OpIdToCalls map[uint32](*rpc.Call)
+	CurrOpId       uint32
+	ChCount        int
+	GetOpIdToCalls map[uint32](*rpc.Call)
+	PutOpIdToCalls map[uint32](*rpc.Call)
 }
 
 func NewKVS() *KVS {
@@ -157,9 +156,8 @@ func (d *KVS) Start(localTracer *tracing.Tracer, clientId string, coordIPPort st
 	d.Data.ChCapacity = chCapacity
 	d.State.CurrOpId = 0
 	d.State.ChCount = 0
-	d.State.GetOpId = make([]uint32, chCapacity)
-	d.State.PutOpId = make([]uint32, chCapacity)
-	d.State.OpIdToCalls = make(map[uint32]*rpc.Call)
+	d.State.GetOpIdToCalls = make(map[uint32]*rpc.Call)
+	d.State.PutOpIdToCalls = make(map[uint32]*rpc.Call)
 
 	trace.RecordAction(KvslibStart{ClientId: clientId})
 
@@ -289,8 +287,7 @@ func (d *KVS) Get(tracer *tracing.Tracer, clientId string, key string) (uint32, 
 	// Update state
 	d.State.CurrOpId += 1
 	d.State.ChCount += 1
-	d.State.GetOpId = append(d.State.GetOpId, opId)
-	d.State.OpIdToCalls[opId] = cbCall // TODO gotta clean this up
+	d.State.GetOpIdToCalls[opId] = cbCall
 
 	return opId, nil
 }
@@ -339,8 +336,7 @@ func (d *KVS) Put(tracer *tracing.Tracer, clientId string, key string, value str
 	// Update state
 	d.State.CurrOpId += 1
 	d.State.ChCount += 1
-	d.State.PutOpId = append(d.State.PutOpId, opId)
-	d.State.OpIdToCalls[opId] = cbCall // TODO gotta clean this up
+	d.State.PutOpIdToCalls[opId] = cbCall
 
 	return opId, nil
 }
@@ -359,8 +355,7 @@ func (d *KVS) ReceiveGetResult(args chainedkv.GetReply, reply *interface{}) erro
 
 	// Update state
 	d.State.ChCount -= 1
-	d.State.GetOpId = util.RemoveUInt32(d.State.GetOpId, args.OpId)
-	delete(d.State.OpIdToCalls, args.OpId)
+	delete(d.State.GetOpIdToCalls, args.OpId)
 
 	return nil
 }
@@ -379,8 +374,7 @@ func (d *KVS) ReceivePutResult(args chainedkv.PutResultArgs, reply *interface{})
 
 	// Update state
 	d.State.ChCount -= 1
-	d.State.PutOpId = util.RemoveUInt32(d.State.PutOpId, args.OpId)
-	delete(d.State.OpIdToCalls, args.OpId)
+	delete(d.State.PutOpIdToCalls, args.OpId)
 
 	return nil
 }
@@ -404,8 +398,8 @@ func (d *KVS) NewTailServer(serverArgs ServerArgs, reply *interface{}) error {
 
 	d.RpcClients.TailClient = tailClient
 
-	for _, opId := range d.State.GetOpId {
-		getArgs := d.State.OpIdToCalls[opId].Args
+	for _, call := range d.State.GetOpIdToCalls {
+		getArgs := call.Args
 		// Invoke Get
 		cbCall := d.RpcClients.TailClient.Go(
 			"Server.Get",
@@ -440,8 +434,8 @@ func (d *KVS) NewHeadServer(serverArgs ServerArgs, reply *interface{}) error {
 
 	d.RpcClients.HeadClient = headClient
 
-	for _, opId := range d.State.PutOpId {
-		putArgs := d.State.OpIdToCalls[opId].Args
+	for _, call := range d.State.PutOpIdToCalls {
+		putArgs := call.Args
 		// Invoke Get
 		cbCall := d.RpcClients.HeadClient.Go(
 			"Server.Put",

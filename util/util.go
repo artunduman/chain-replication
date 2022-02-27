@@ -66,29 +66,3 @@ func GetRPCClient(localAddr string, remoteAddr string) (*rpc.Client, error) {
 
 	return rpc.NewClient(conn), nil
 }
-
-func RemoveUInt32(s []uint32, num uint32) []uint32 {
-	start := 0
-	end := len(s) - 1
-	index := binarySearch(s, num, start, end)
-	if index != -1 {
-		return append(s[:index], s[index+1:]...)
-	} else {
-		return s
-	}
-}
-
-func binarySearch(s []uint32, num uint32, start int, end int) int {
-	if start > end {
-		return -1
-	}
-
-	mid := (start + end) / 2
-	if s[mid] == num {
-		return mid
-	} else if s[mid] > num {
-		return binarySearch(s, num, start, mid-1)
-	} else {
-		return binarySearch(s, num, mid+1, end)
-	}
-}
