@@ -87,6 +87,11 @@ type NodeResponse struct {
 	Token        tracing.TracingToken
 }
 
+type ClientRequest struct {
+	ClientId     string
+	ClientIpPort string
+}
+
 type Coord struct {
 	currChainLen      uint8
 	discoveredServers map[uint8]*ServerNode
@@ -192,5 +197,17 @@ func (c *Coord) GetTail(args NodeRequest, reply *NodeResponse) error {
 	reply.ServerId = c.currChainLen // TODO deterministically return server id
 	reply.ServerIpPort = c.discoveredServers[c.currChainLen].remoteIpPort
 	reply.Token = args.Token
+	return nil
+}
+
+func (c *Coord) ClientJoin(args ClientRequest, reply *interface{}) error {
+	// TODO store new client information
+	log.Println("Client join received")
+	return nil
+}
+
+func (c *Coord) ClientLeave(args ClientRequest, reply *interface{}) error {
+	// TODO delete leaving client information
+	log.Println("Client leave received")
 	return nil
 }

@@ -318,6 +318,7 @@ func (s *Server) putFwd(trace *tracing.Trace, args PutArgs, reply *interface{}) 
 
 func (s *Server) putTail(trace *tracing.Trace, args PutArgs, reply *interface{}) error {
 	var putResultArgs PutResultArgs
+	var putKVSResp interface{}
 
 	client, err := rpc.Dial("tcp", args.ClientAddr)
 
@@ -333,7 +334,7 @@ func (s *Server) putTail(trace *tracing.Trace, args PutArgs, reply *interface{})
 	trace.RecordAction(PutResult{args.ClientId, args.OpId, args.GId, args.Key, args.Value})
 
 	putResultArgs.Token = trace.GenerateToken()
-	err = client.Call("KVS.ReceivePutResult", putResultArgs, nil)
+	err = client.Call("KVS.ReceivePutResult", putResultArgs, &putKVSResp)
 
 	if err != nil {
 		return err
@@ -375,6 +376,7 @@ func (s *Server) Put(args PutArgs, reply *interface{}) error {
 
 func (s *Server) Get(args GetArgs, reply *interface{}) error {
 	var getReply GetReply
+	var getKVSResp interface{}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -397,10 +399,10 @@ func (s *Server) Get(args GetArgs, reply *interface{}) error {
 	getReply.Key = args.Key
 	getReply.Value = s.KVS[args.Key]
 
-	trace.RecordAction(PutResult{args.ClientId, args.OpId, getReply.GId, args.Key, getReply.Value})
+	trace.RecordAction(GetResult{args.ClientId, args.OpId, getReply.GId, args.Key, getReply.Value})
 
 	getReply.Token = trace.GenerateToken()
-	err = client.Call("KVS.ReceiveGetResult", getReply, nil)
+	err = client.Call("KVS.ReceiveGetResult", getReply, &getKVSResp)
 
 	if err != nil {
 		return err

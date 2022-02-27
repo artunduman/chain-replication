@@ -141,6 +141,7 @@ func (d *KVS) Start(localTracer *tracing.Tracer, clientId string, coordIPPort st
 	var trace *tracing.Trace
 	var headServResp chainedkv.NodeResponse
 	var tailServResp chainedkv.NodeResponse
+	var clientCoordResp interface{}
 
 	trace = localTracer.CreateTrace()
 
@@ -161,10 +162,50 @@ func (d *KVS) Start(localTracer *tracing.Tracer, clientId string, coordIPPort st
 
 	trace.RecordAction(KvslibStart{ClientId: clientId})
 
+	// Setup local rpc
+	err := rpc.Register(d)
+	if err != nil {
+		log.Println("kvslib.Start() - Error in initiating rpc: ", err)
+		return nil, err
+	}
+
+	localTailServerIP, _, err := net.SplitHostPort(localTailServerIPPort)
+	if err != nil {
+		log.Println("kvslib.Start() - Error in spliting localTailServerIPPort: ", err)
+		return nil, err
+	}
+
+	port, err := util.GetFreeTCPPort(localTailServerIP)
+	if err != nil {
+		log.Println("kvslib.Start() - Error in obtaining local client ip: ", err)
+		return nil, err
+	}
+
+	d.Data.ClientIpPort = net.JoinHostPort(localTailServerIP, strconv.Itoa(port))
+	tcpAddrClient, err := net.ResolveTCPAddr("tcp", d.Data.ClientIpPort)
+	if err != nil {
+		log.Println("kvslib.Start() - Error in resolving local client ip: ", err)
+		return nil, err
+	}
+
+	clientListener, err := net.ListenTCP("tcp", tcpAddrClient)
+	if err != nil {
+		log.Println("kvslib.Start() - Error in listening to tcp on local client ip: ", err)
+		return nil, err
+	}
+
+	go rpc.Accept(clientListener)
+
 	// Connect to rpc clients
 	coordClient, err := util.GetRPCClient(localCoordIPPort, coordIPPort)
 	if err != nil {
 		log.Println("kvslib.Start() - Error in connecting to coord:", err)
+		return nil, err
+	}
+
+	err = coordClient.Call("Coord.ClientJoin", chainedkv.ClientRequest{ClientId: clientId, ClientIpPort: d.Data.ClientIpPort}, &clientCoordResp)
+	if err != nil {
+		log.Println("kvslib.Start() - Error in sending client info to coord: ", err)
 		return nil, err
 	}
 
@@ -211,34 +252,6 @@ func (d *KVS) Start(localTracer *tracing.Tracer, clientId string, coordIPPort st
 	d.RpcClients.CoordClient = coordClient
 	d.RpcClients.HeadClient = headClient
 	d.RpcClients.TailClient = tailClient
-
-	// Setup local rpc
-	err = rpc.Register(d)
-	if err != nil {
-		log.Println("kvslib.Start() - Error in initiating rpc: ", err)
-		return nil, err
-	}
-
-	port, err := util.GetFreeTCPPort(localTailServerIPPort)
-	if err != nil {
-		log.Println("kvslib.Start() - Error in obtaining local client ip: ", err)
-		return nil, err
-	}
-
-	d.Data.ClientIpPort = net.JoinHostPort(localTailServerIPPort, strconv.Itoa(port))
-	tcpAddrClient, err := net.ResolveTCPAddr("tcp", d.Data.ClientIpPort)
-	if err != nil {
-		log.Println("kvslib.Start() - Error in resolving local client ip: ", err)
-		return nil, err
-	}
-
-	clientListener, err := net.ListenTCP("tcp", tcpAddrClient)
-	if err != nil {
-		log.Println("kvslib.Start() - Error in listening to tcp on local client ip: ", err)
-		return nil, err
-	}
-
-	go rpc.Accept(clientListener)
 
 	return d.NotifyCh, nil
 }
@@ -454,11 +467,19 @@ func (d *KVS) NewHeadServer(serverArgs ServerArgs, reply *interface{}) error {
 // Stop Stops the KVS instance from communicating with the KVS and from delivering any results via the notify-channel.
 // This call always succeeds.
 func (d *KVS) Stop() {
+	var clientCoordResp interface{}
+
 	// Reserve critical section
 	d.Mutex.Lock()
 	defer d.Mutex.Unlock()
 
 	d.Data.Tracer.CreateTrace().RecordAction(KvslibStop{ClientId: d.Data.ClientId})
+
+	err := d.RpcClients.CoordClient.Call("Coord.ClientLeave", chainedkv.ClientRequest{ClientId: d.Data.ClientId, ClientIpPort: d.Data.ClientIpPort}, &clientCoordResp)
+	if err != nil {
+		// Attempt to leave failed, proceed with stop() anyways
+		log.Println("kvslib.Stop() - Error in sending leave request to coord: ", err)
+	}
 
 	d.RpcClients.HeadClient.Close()
 	d.RpcClients.TailClient.Close()
