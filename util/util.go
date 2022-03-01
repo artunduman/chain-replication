@@ -5,6 +5,26 @@ import (
 	"net/rpc"
 )
 
+func GetFreeTCPPort(addrIp string) (int, error) {
+	ipPort, err := net.ResolveTCPAddr(
+		"tcp",
+		net.JoinHostPort(addrIp, "0"),
+	)
+
+	if err != nil {
+		return 0, err
+	}
+
+	l, err := net.ListenTCP("tcp", ipPort)
+
+	if err != nil {
+		return 0, err
+	}
+
+	defer l.Close()
+	return l.Addr().(*net.TCPAddr).Port, nil
+}
+
 func GetFreeUDPPort(addrIp string) (int, error) {
 	ipPort, err := net.ResolveUDPAddr(
 		"udp",

@@ -153,24 +153,25 @@ type PutArgs struct {
 	Token      tracing.TracingToken
 }
 
-type PutResultArgs struct {
+type GetArgs struct {
+	ClientId   string
+	OpId       uint32
+	Key        string
+	ClientAddr string
+	Token      tracing.TracingToken
+}
+
+type ReplyArgs struct {
 	OpId  uint32
 	GId   uint64
+	Key   string
 	Value string
 	Token tracing.TracingToken
 }
 
-type GetArgs struct {
-	ClientId string
-	OpId     uint32
-	Key      string
-	Token    tracing.TracingToken
-}
-
-type GetReply struct {
-	Value string
-	GId   uint64
-	Token tracing.TracingToken
+type ServerArgs struct {
+	ServerId     uint8
+	ServerIpPort string
 }
 
 func NewServer() *Server {
@@ -304,10 +305,12 @@ func (s *Server) isHead() bool {
 }
 
 func (s *Server) putFwd(trace *tracing.Trace, args PutArgs, reply *interface{}) error {
+	var putReply interface{}
+
 	trace.RecordAction(PutFwd{args.ClientId, args.OpId, args.GId, args.Key, args.Value})
 
 	args.Token = trace.GenerateToken()
-	err := s.NextServer.Call("Server.Put", args, nil)
+	err := s.NextServer.Call("Server.Put", args, &putReply)
 
 	if err != nil {
 		return err
@@ -317,7 +320,8 @@ func (s *Server) putFwd(trace *tracing.Trace, args PutArgs, reply *interface{}) 
 }
 
 func (s *Server) putTail(trace *tracing.Trace, args PutArgs, reply *interface{}) error {
-	var putResultArgs PutResultArgs
+	var replyArgs ReplyArgs
+	var receivePutReply interface{}
 
 	client, err := rpc.Dial("tcp", args.ClientAddr)
 
@@ -325,14 +329,21 @@ func (s *Server) putTail(trace *tracing.Trace, args PutArgs, reply *interface{})
 		return err
 	}
 
-	putResultArgs.GId = args.GId
-	putResultArgs.OpId = args.OpId
-	putResultArgs.Value = args.Value
+	replyArgs.GId = args.GId
+	replyArgs.OpId = args.OpId
+	replyArgs.Key = args.Key
+	replyArgs.Value = args.Value
 
-	trace.RecordAction(PutResult{args.ClientId, args.OpId, args.GId, args.Key, args.Value})
+	trace.RecordAction(PutResult{
+		args.ClientId,
+		args.OpId,
+		args.GId,
+		args.Key,
+		args.Value,
+	})
 
-	putResultArgs.Token = trace.GenerateToken()
-	err = client.Call("KVS.ReceivePutResult", putResultArgs, nil)
+	replyArgs.Token = trace.GenerateToken()
+	err = client.Call("KVS.ReceivePutResult", replyArgs, &receivePutReply)
 
 	if err != nil {
 		return err
@@ -372,7 +383,10 @@ func (s *Server) Put(args PutArgs, reply *interface{}) error {
 	return s.putFwd(trace, args, reply)
 }
 
-func (s *Server) Get(args GetArgs, reply *GetReply) error {
+func (s *Server) Get(args GetArgs, reply *interface{}) error {
+	var replyArgs ReplyArgs
+	var receiveGetReply interface{}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -383,13 +397,31 @@ func (s *Server) Get(args GetArgs, reply *GetReply) error {
 	trace := s.Tracer.ReceiveToken(args.Token)
 	trace.RecordAction(GetRecvd{args.ClientId, args.OpId, args.Key})
 
-	reply.GId = s.CurGId
-	trace.RecordAction(GetOrdered{args.ClientId, args.OpId, reply.GId, args.Key})
+	client, err := rpc.Dial("tcp", args.ClientAddr)
 
-	reply.Value = s.KVS[args.Key]
-	trace.RecordAction(GetResult{args.ClientId, args.OpId, reply.GId, args.Key, reply.Value})
+	if err != nil {
+		return err
+	}
 
-	reply.Token = trace.GenerateToken()
+	replyArgs.GId = s.CurGId
+	replyArgs.OpId = args.OpId
+	replyArgs.Key = args.Key
+	replyArgs.Value = s.KVS[args.Key]
+
+	trace.RecordAction(GetResult{
+		args.ClientId,
+		args.OpId,
+		s.CurGId,
+		args.Key,
+		s.KVS[args.Key],
+	})
+
+	replyArgs.Token = trace.GenerateToken()
+	err = client.Call("KVS.ReceiveGetResult", replyArgs, &receiveGetReply)
+
+	if err != nil {
+		return err
+	}
 
 	return nil
 }
