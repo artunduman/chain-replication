@@ -303,6 +303,49 @@ func (s *Server) RegisterNextServer(args RegisterServerArgs, reply *tracing.Trac
 	return nil
 }
 
+type ServerFailArgs struct {
+	FailedServerId uint8
+	NewServerAddr  *string
+	NewServerId    uint8
+	Token          tracing.TracingToken
+}
+
+func (s *Server) ServerFailNewNextServer(args ServerFailArgs, reply *tracing.TracingToken) error {
+	trace := s.Tracer.ReceiveToken(args.Token)
+	trace.RecordAction(ServerFailRecvd{args.FailedServerId})
+	if args.NewServerAddr == nil {
+		s.NextServer = nil
+	} else {
+		nextServer, err := rpc.Dial("tcp", *args.NewServerAddr)
+		if err != nil {
+			return err
+		}
+		s.NextServer = nextServer
+		trace.RecordAction(NewFailoverSuccessor{args.NewServerId})
+	}
+	trace.RecordAction(ServerFailHandled{args.FailedServerId})
+	*reply = trace.GenerateToken()
+	return nil
+}
+
+func (s *Server) ServerFailNewPrevServer(args ServerFailArgs, reply *tracing.TracingToken) error {
+	trace := s.Tracer.ReceiveToken(args.Token)
+	trace.RecordAction(ServerFailRecvd{args.FailedServerId})
+	if args.NewServerAddr == nil {
+		s.PrevServer = nil
+	} else {
+		prevServer, err := rpc.Dial("tcp", *args.NewServerAddr)
+		if err != nil {
+			return err
+		}
+		s.PrevServer = prevServer
+		trace.RecordAction(NewFailoverPredecessor{args.NewServerId})
+	}
+	trace.RecordAction(ServerFailHandled{args.FailedServerId})
+	*reply = trace.GenerateToken()
+	return nil
+}
+
 func (s *Server) isTail() bool {
 	return s.NextServer == nil
 }

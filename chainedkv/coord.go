@@ -4,6 +4,7 @@ import (
 	fchecker "cs.ubc.ca/cpsc416/a3/fcheck"
 	"errors"
 	"log"
+	"math"
 	"math/rand"
 	"net"
 	"net/rpc"
@@ -77,6 +78,7 @@ type ServerNode struct {
 	remoteIpPort string
 	client       *rpc.Client
 	ackIpPort    string
+	joined       bool
 }
 
 type NodeRequest struct {
@@ -96,13 +98,12 @@ type ClientRequest struct {
 }
 
 type Coord struct {
-	currChainLen      uint8
+	currChain         []uint8
 	discoveredServers map[uint8]*ServerNode
 	cond              *sync.Cond
 	tracer            *tracing.Tracer
 	numServers        uint8
 	lostMsgsThresh    uint8
-	notifyFailureCh   <-chan fchecker.FailureDetected
 	localIp           string
 }
 
@@ -112,7 +113,7 @@ func NewCoord() *Coord {
 
 func (c *Coord) Start(clientAPIListenAddr string, serverAPIListenAddr string, lostMsgsThresh uint8, numServers uint8, ctrace *tracing.Tracer) error {
 	c.discoveredServers = make(map[uint8]*ServerNode)
-	c.currChainLen = 0
+	c.currChain = make([]uint8, 0)
 	c.cond = sync.NewCond(&sync.Mutex{})
 	c.tracer = ctrace
 	c.numServers = numServers
@@ -177,24 +178,24 @@ func (c *Coord) Join(args JoinArgs, reply *JoinReply) error {
 		return err // TODO make this more descriptive
 	}
 	c.discoveredServers[args.ServerId] = &ServerNode{
-		serverId: args.ServerId, remoteIpPort: args.ServerAddr, client: client, ackIpPort: args.AckIpPort,
+		serverId: args.ServerId, remoteIpPort: args.ServerAddr, client: client, ackIpPort: args.AckIpPort, joined: false,
 	}
 	// Wait until the server is the next in the chain
-	for c.currChainLen+1 != args.ServerId {
+	for uint8(len(c.currChain)+1) != args.ServerId {
 		c.cond.Wait()
 	}
 
-	expectedServerId := c.currChainLen + 1
+	expectedServerId := uint8(len(c.currChain) + 1)
 	// Assert serverId == expected
 	if args.ServerId != expectedServerId {
 		log.Println("Coord.Join: serverId != expectedServerId")
 		return errors.New("serverId:" + string(args.ServerId) + "!= expectedServerId:" + string(expectedServerId) + ", something went wrong")
 	}
 
-	if c.currChainLen == 0 {
+	if len(c.currChain) == 0 {
 		*reply = JoinReply{PrevServerAddress: nil, Token: trace.GenerateToken()}
 	} else {
-		prevServerId := c.currChainLen
+		prevServerId := c.currChain[len(c.currChain)-1]
 		prevServerAddr := c.discoveredServers[prevServerId].remoteIpPort
 		*reply = JoinReply{PrevServerAddress: &prevServerAddr, Token: trace.GenerateToken()}
 	}
@@ -211,19 +212,20 @@ func (c *Coord) Joined(args JoinedArgs, reply *bool) error {
 	c.cond.L.Lock()
 	defer c.cond.L.Unlock()
 
-	if args.ServerId != c.currChainLen+1 {
+	if args.ServerId != uint8(len(c.currChain)+1) {
 		log.Println("Coord.Joined: serverId != expectedServerId")
-		return errors.New("serverId:" + string(args.ServerId) + "!= expectedServerId:" + string(c.currChainLen) + ", something went wrong")
+		return errors.New("serverId:" + string(args.ServerId) + "!= expectedServerId:" + string(rune(len(c.currChain))) + ", something went wrong")
 	}
 
 	trace := c.tracer.ReceiveToken(args.Token)
 	trace.RecordAction(ServerJoinedRecvd{args.ServerId})
 
-	// Only increment the chain length when it successfully joined
-	c.currChainLen++
+	// Only update the chain when it successfully joined
+	c.currChain = append(c.currChain, args.ServerId)
+	c.discoveredServers[args.ServerId].joined = true
 	// Unblock waiting join requests TODO should I unblock before getting the joined ack?
 	c.cond.Broadcast()
-	if c.currChainLen == c.numServers {
+	if uint8(len(c.currChain)) == c.numServers {
 		trace.RecordAction(AllServersJoined{})
 		// Start heartbeats
 		nodes := make([]ServerNode, 0, len(c.discoveredServers))
@@ -233,17 +235,100 @@ func (c *Coord) Joined(args JoinedArgs, reply *bool) error {
 		notifyFailureCh, err := startFcheck(c.localIp, nodes, c.lostMsgsThresh)
 		if err != nil {
 			log.Println("Coord.Joined: startFcheck failed:", err)
-			// Ignore for now
+			// Ignore for now, hopefully never fails
 		}
-		c.notifyFailureCh = notifyFailureCh
+		go c.checkFailure(notifyFailureCh)
 	}
 	*reply = true
 	return nil
 }
 
+func (c *Coord) checkFailure(notifyFailureCh <-chan fchecker.FailureDetected) {
+	for {
+		failure := <-notifyFailureCh
+		c.handleFailure(failure.ServerId)
+	}
+}
+
+func (c *Coord) handleFailure(serverId uint8) {
+	c.cond.L.Lock()
+	defer c.cond.L.Unlock()
+	trace := c.tracer.CreateTrace()
+	trace.RecordAction(ServerFail{serverId})
+	c.currChain = append(c.currChain[:serverId-1], c.currChain[serverId:]...)
+	c.discoveredServers[serverId].joined = false
+
+	prevServerId, nextServerId := c.getPrevNextActiveServers(serverId)
+
+	// Set addresses to send to servers
+	var prevAddr *string
+	var nextAddr *string
+	if prevServerId == 0 {
+		prevAddr = nil
+	} else {
+		*prevAddr = c.discoveredServers[prevServerId].remoteIpPort
+	}
+	if nextServerId == 0 {
+		nextAddr = nil
+	} else {
+		*nextAddr = c.discoveredServers[nextServerId].remoteIpPort
+	}
+	// Send new servers
+	var tokenRecvd tracing.TracingToken
+	// TODO parallelize
+	if prevServerId != 0 {
+		prevClient := c.discoveredServers[prevServerId].client
+		err := prevClient.Call("Server.ServerFailNewNextServer", ServerFailArgs{
+			serverId,
+			nextAddr,
+			nextServerId,
+			trace.GenerateToken(),
+		}, &tokenRecvd)
+		if err != nil {
+			log.Println("Coord.handleFailure: prevClient.Call failed:", err)
+			return // TODO handle this somehow
+		}
+		trace = c.tracer.ReceiveToken(tokenRecvd)
+		trace.RecordAction(ServerFailHandledRecvd{serverId, prevServerId})
+	}
+	if nextServerId != 0 {
+		nextClient := c.discoveredServers[nextServerId].client
+		err := nextClient.Call("Server.ServerFailNewPrevServer", ServerFailArgs{
+			serverId,
+			prevAddr,
+			prevServerId,
+			trace.GenerateToken(),
+		}, &tokenRecvd)
+		if err != nil {
+			log.Println("Coord.handleFailure: nextClient.Call failed:", err)
+			return // TODO handle this somehow
+		}
+		trace = c.tracer.ReceiveToken(tokenRecvd)
+		trace.RecordAction(ServerFailHandledRecvd{serverId, nextServerId})
+	}
+	trace.RecordAction(NewChain{c.currChain})
+}
+
+func (c *Coord) getPrevNextActiveServers(serverId uint8) (uint8, uint8) {
+	prevServerId := uint8(0)
+	nextServerId := uint8(math.MaxUint8)
+	for _, currServer := range c.discoveredServers {
+		if currServer.serverId < serverId && currServer.joined && currServer.serverId > prevServerId {
+			prevServerId = currServer.serverId
+		}
+		if currServer.serverId > serverId && currServer.joined && currServer.serverId < nextServerId {
+			nextServerId = currServer.serverId
+		}
+	}
+	if nextServerId == math.MaxUint8 {
+		nextServerId = 0
+	}
+	return prevServerId, nextServerId
+}
+
 func (c *Coord) GetHead(args NodeRequest, reply *NodeResponse) error {
 	// TODO check if coord is ready
-	reply.ServerId = 1 // TODO deterministically return server id
+	reply.ServerId = c.currChain[0] // TODO deterministically return server id
 	reply.ServerIpPort = c.discoveredServers[reply.ServerId].remoteIpPort
 	reply.Token = args.Token
 	return nil
@@ -251,7 +336,7 @@ func (c *Coord) GetHead(args NodeRequest, reply *NodeResponse) error {
 
 func (c *Coord) GetTail(args NodeRequest, reply *NodeResponse) error {
 	// TODO check if coord is ready
-	reply.ServerId = c.currChainLen // TODO deterministically return server id
+	reply.ServerId = c.currChain[len(c.currChain)-1] // TODO deterministically return server id
 	reply.ServerIpPort = c.discoveredServers[reply.ServerId].remoteIpPort
 	reply.Token = args.Token
 	return nil
