@@ -175,7 +175,7 @@ func (c *Coord) Join(args JoinArgs, reply *JoinReply) error {
 	client, err := rpc.Dial("tcp", args.ServerAddr)
 	if err != nil {
 		log.Println("Coord.Join: can't dial server:", err)
-		return err // TODO make this more descriptive
+		return err
 	}
 	c.discoveredServers[args.ServerId] = &ServerNode{
 		serverId: args.ServerId, remoteIpPort: args.ServerAddr, client: client, ackIpPort: args.AckIpPort, joined: false,
@@ -223,7 +223,8 @@ func (c *Coord) Joined(args JoinedArgs, reply *bool) error {
 	// Only update the chain when it successfully joined
 	c.currChain = append(c.currChain, args.ServerId)
 	c.discoveredServers[args.ServerId].joined = true
-	// Unblock waiting join requests TODO should I unblock before getting the joined ack?
+	trace.RecordAction(NewChain{c.currChain})
+	// Unblock waiting join requests
 	c.cond.Broadcast()
 	if uint8(len(c.currChain)) == c.numServers {
 		trace.RecordAction(AllServersJoined{})
