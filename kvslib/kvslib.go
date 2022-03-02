@@ -204,17 +204,6 @@ func (d *KVS) Start(localTracer *tracing.Tracer, clientId string, coordIPPort st
 		return nil, err
 	}
 
-	var test interface{}
-	err = d.Clients.CoordClient.Call(
-		"Coord.ClientJoin",
-		chainedkv.ClientRequest{ClientId: clientId, ClientIpPort: d.Data.ClientIPPort},
-		&test,
-	)
-
-	if err != nil {
-		return nil, err
-	}
-
 	err = d.getHead(&servResp)
 
 	if err != nil {
@@ -570,21 +559,11 @@ func (d *KVS) getTail(servResp *chainedkv.NodeResponse) error {
 // Stop Stops the KVS instance from communicating with the KVS and
 // from delivering any results via the notify-channel. This call always succeeds.
 func (d *KVS) Stop() {
-	var clientLeaveReply interface{}
 
 	d.Mutex.Lock()
 	defer d.Mutex.Unlock()
 
 	d.Data.Trace.RecordAction(KvslibStop{ClientId: d.Data.ClientId})
-
-	d.Clients.CoordClient.Call(
-		"Coord.ClientLeave",
-		chainedkv.ClientRequest{
-			ClientId:     d.Data.ClientId,
-			ClientIpPort: d.Data.ClientIPPort,
-		},
-		&clientLeaveReply,
-	)
 
 	d.Clients.HeadClient.Close()
 	d.Clients.TailClient.Close()

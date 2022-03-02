@@ -81,7 +81,6 @@ type NodeRequest struct {
 }
 
 type NodeResponse struct {
-	ClientId     string
 	ServerId     uint8
 	ServerIpPort string
 	Token        tracing.TracingToken
@@ -184,30 +183,16 @@ func (c *Coord) Join(args JoinArgs, reply *JoinReply) error {
 
 func (c *Coord) GetHead(args NodeRequest, reply *NodeResponse) error {
 	// TODO check if coord is ready
-	reply.ClientId = args.ClientId
 	reply.ServerId = 1 // TODO deterministically return server id
-	reply.ServerIpPort = c.discoveredServers[1].remoteIpPort
+	reply.ServerIpPort = c.discoveredServers[reply.ServerId].remoteIpPort
 	reply.Token = args.Token
 	return nil
 }
 
 func (c *Coord) GetTail(args NodeRequest, reply *NodeResponse) error {
 	// TODO check if coord is ready
-	reply.ClientId = args.ClientId
 	reply.ServerId = c.currChainLen // TODO deterministically return server id
-	reply.ServerIpPort = c.discoveredServers[c.currChainLen].remoteIpPort
+	reply.ServerIpPort = c.discoveredServers[reply.ServerId].remoteIpPort
 	reply.Token = args.Token
-	return nil
-}
-
-func (c *Coord) ClientJoin(args ClientRequest, reply *interface{}) error {
-	// TODO store new client information
-	log.Println("Client join received")
-	return nil
-}
-
-func (c *Coord) ClientLeave(args ClientRequest, reply *interface{}) error {
-	// TODO delete leaving client information
-	log.Println("Client leave received")
 	return nil
 }
