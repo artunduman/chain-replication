@@ -90,10 +90,12 @@ func Start(arg StartStruct) (notifyCh <-chan FailureDetected, err error) {
 		return nil, nil
 	}
 
-	err = ackInit(arg)
+	if arg.AckLocalIPAckLocalPort != "" {
+		err = ackInit(arg)
 
-	if err != nil {
-		return nil, err
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	err = hbeatInit(arg)

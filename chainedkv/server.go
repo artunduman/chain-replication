@@ -2,7 +2,6 @@ package chainedkv
 
 import (
 	"errors"
-	"fmt"
 	"net"
 	"net/rpc"
 	"strconv"
@@ -228,11 +227,18 @@ func (s *Server) Start(serverId uint8, coordAddr string, serverAddr string,
 		return err
 	}
 
+	// Start listening for heartbeats
+	ackIpPort, err := s.startFcheck(serverAddr)
+
+	if err != nil {
+		return err
+	}
+
 	// Join chain
 	s.Trace.RecordAction(ServerJoining{s.Id})
 	err = s.Coord.Call(
 		"Coord.Join",
-		JoinArgs{serverId, serverListenAddr, s.Trace.GenerateToken()},
+		JoinArgs{serverId, serverListenAddr, ackIpPort, s.Trace.GenerateToken()},
 		&coordJoinReply,
 	)
 
@@ -263,14 +269,6 @@ func (s *Server) Start(serverId uint8, coordAddr string, serverAddr string,
 	}
 
 	s.Trace.RecordAction(ServerJoined{s.Id})
-
-	ackIpPort, err := s.startFcheck(serverAddr)
-
-	if err != nil {
-		return err
-	}
-
-	fmt.Println("TODO", ackIpPort)
 
 	// Send joined to coord
 	err = s.Coord.Call(

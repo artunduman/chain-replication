@@ -1,8 +1,10 @@
 package chainedkv
 
 import (
+	fchecker "cs.ubc.ca/cpsc416/a3/fcheck"
 	"errors"
 	"log"
+	"math/rand"
 	"net"
 	"net/rpc"
 	"os"
@@ -71,8 +73,10 @@ type CoordConfig struct {
 }
 
 type ServerNode struct {
+	serverId     uint8
 	remoteIpPort string
 	client       *rpc.Client
+	ackIpPort    string
 }
 
 type NodeRequest struct {
@@ -98,6 +102,8 @@ type Coord struct {
 	tracer            *tracing.Tracer
 	numServers        uint8
 	lostMsgsThresh    uint8
+	notifyFailureCh   <-chan fchecker.FailureDetected
+	localIp           string
 }
 
 func NewCoord() *Coord {
@@ -111,8 +117,13 @@ func (c *Coord) Start(clientAPIListenAddr string, serverAPIListenAddr string, lo
 	c.tracer = ctrace
 	c.numServers = numServers
 	c.lostMsgsThresh = lostMsgsThresh
+	host, _, err := net.SplitHostPort(clientAPIListenAddr) // TODO make sure clientAPI is appropriate
+	if err != nil {
+		return err
+	}
+	c.localIp = host
 
-	err := rpc.Register(c)
+	err = rpc.Register(c)
 	if err != nil {
 		log.Println("Coord.Start: rpc.Register failed:", err)
 		return err
@@ -143,6 +154,7 @@ func (c *Coord) Start(clientAPIListenAddr string, serverAPIListenAddr string, lo
 type JoinArgs struct {
 	ServerId   uint8
 	ServerAddr string
+	AckIpPort  string
 	Token      tracing.TracingToken
 }
 
@@ -164,7 +176,9 @@ func (c *Coord) Join(args JoinArgs, reply *JoinReply) error {
 		log.Println("Coord.Join: can't dial server:", err)
 		return err // TODO make this more descriptive
 	}
-	c.discoveredServers[args.ServerId] = &ServerNode{remoteIpPort: args.ServerAddr, client: client}
+	c.discoveredServers[args.ServerId] = &ServerNode{
+		serverId: args.ServerId, remoteIpPort: args.ServerAddr, client: client, ackIpPort: args.AckIpPort,
+	}
 	// Wait until the server is the next in the chain
 	for c.currChainLen+1 != args.ServerId {
 		c.cond.Wait()
@@ -209,6 +223,20 @@ func (c *Coord) Joined(args JoinedArgs, reply *bool) error {
 	c.currChainLen++
 	// Unblock waiting join requests TODO should I unblock before getting the joined ack?
 	c.cond.Broadcast()
+	if c.currChainLen == c.numServers {
+		trace.RecordAction(AllServersJoined{})
+		// Start heartbeats
+		nodes := make([]ServerNode, 0, len(c.discoveredServers))
+		for _, node := range c.discoveredServers {
+			nodes = append(nodes, *node)
+		}
+		notifyFailureCh, err := startFcheck(c.localIp, nodes, c.lostMsgsThresh)
+		if err != nil {
+			log.Println("Coord.Joined: startFcheck failed:", err)
+			// Ignore for now
+		}
+		c.notifyFailureCh = notifyFailureCh
+	}
 	*reply = true
 	return nil
 }
@@ -227,4 +255,26 @@ func (c *Coord) GetTail(args NodeRequest, reply *NodeResponse) error {
 	reply.ServerIpPort = c.discoveredServers[reply.ServerId].remoteIpPort
 	reply.Token = args.Token
 	return nil
+}
+
+func startFcheck(localIp string, remoteServers []ServerNode, lostMsgThresh uint8) (notifyCh <-chan fchecker.FailureDetected, err error) {
+	// Convert servernode to fchecker.Server
+	var servers []fchecker.Server
+	for _, server := range remoteServers {
+		servers = append(servers, fchecker.Server{
+			ServerId: server.serverId, Addr: server.ackIpPort,
+		})
+	}
+	notifyCh, err = fchecker.Start(fchecker.StartStruct{
+		AckLocalIPAckLocalPort:       "",
+		EpochNonce:                   rand.Uint64(),
+		HBeatLocalIP:                 localIp,
+		HBeatRemoteIPHBeatRemotePort: servers,
+		LostMsgThresh:                lostMsgThresh,
+	})
+	if err != nil {
+		log.Println("Coord.Start: can't start fchecker:", err)
+		return nil, err
+	}
+	return notifyCh, nil
 }
