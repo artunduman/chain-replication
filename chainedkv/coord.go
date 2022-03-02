@@ -95,6 +95,9 @@ type Coord struct {
 	currChainLen      uint8
 	discoveredServers map[uint8]*ServerNode
 	cond              *sync.Cond
+	tracer            *tracing.Tracer
+	numServers        uint8
+	lostMsgsThresh    uint8
 }
 
 func NewCoord() *Coord {
@@ -105,6 +108,10 @@ func (c *Coord) Start(clientAPIListenAddr string, serverAPIListenAddr string, lo
 	c.discoveredServers = make(map[uint8]*ServerNode)
 	c.currChainLen = 0
 	c.cond = sync.NewCond(&sync.Mutex{})
+	c.tracer = ctrace
+	c.numServers = numServers
+	c.lostMsgsThresh = lostMsgsThresh
+
 	err := rpc.Register(c)
 	if err != nil {
 		log.Println("Coord.Start: rpc.Register failed:", err)
@@ -125,7 +132,7 @@ func (c *Coord) Start(clientAPIListenAddr string, serverAPIListenAddr string, lo
 	go rpc.Accept(clientListener)
 	go rpc.Accept(serverListener)
 	// Wait for interrupt
-	log.Println("Coord started...")
+	c.tracer.CreateTrace().RecordAction(CoordStart{})
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
 	<-sig
@@ -141,19 +148,22 @@ type JoinArgs struct {
 
 type JoinReply struct {
 	PrevServerAddress *string
+	Token             tracing.TracingToken
 }
 
 func (c *Coord) Join(args JoinArgs, reply *JoinReply) error {
-	// Dial rpc for server
-	log.Println("Coord.Join: received join from", args.ServerId)
+	// Lock the critical section
+	c.cond.L.Lock()
+	defer c.cond.L.Unlock()
+
+	trace := c.tracer.ReceiveToken(args.Token)
+	trace.RecordAction(ServerJoiningRecvd{args.ServerId})
+
 	client, err := rpc.Dial("tcp", args.ServerAddr)
 	if err != nil {
 		log.Println("Coord.Join: can't dial server:", err)
 		return err // TODO make this more descriptive
 	}
-	// Lock the critical section
-	c.cond.L.Lock()
-	defer c.cond.L.Unlock()
 	c.discoveredServers[args.ServerId] = &ServerNode{remoteIpPort: args.ServerAddr, client: client}
 	// Wait until the server is the next in the chain
 	for c.currChainLen+1 != args.ServerId {
@@ -167,17 +177,39 @@ func (c *Coord) Join(args JoinArgs, reply *JoinReply) error {
 		return errors.New("serverId:" + string(args.ServerId) + "!= expectedServerId:" + string(expectedServerId) + ", something went wrong")
 	}
 
-	log.Println("Coord.Join: server id added to chain:", args.ServerId)
-	c.currChainLen++
-
-	if c.currChainLen == 1 {
-		*reply = JoinReply{PrevServerAddress: nil}
+	if c.currChainLen == 0 {
+		*reply = JoinReply{PrevServerAddress: nil, Token: trace.GenerateToken()}
 	} else {
-		prevServerId := c.currChainLen - 1
+		prevServerId := c.currChainLen
 		prevServerAddr := c.discoveredServers[prevServerId].remoteIpPort
-		*reply = JoinReply{PrevServerAddress: &prevServerAddr}
+		*reply = JoinReply{PrevServerAddress: &prevServerAddr, Token: trace.GenerateToken()}
 	}
 	c.cond.Broadcast()
+	return nil
+}
+
+type JoinedArgs struct {
+	ServerId uint8
+	Token    tracing.TracingToken
+}
+
+func (c *Coord) Joined(args JoinedArgs, reply *bool) error {
+	c.cond.L.Lock()
+	defer c.cond.L.Unlock()
+
+	if args.ServerId != c.currChainLen+1 {
+		log.Println("Coord.Joined: serverId != expectedServerId")
+		return errors.New("serverId:" + string(args.ServerId) + "!= expectedServerId:" + string(c.currChainLen) + ", something went wrong")
+	}
+
+	trace := c.tracer.ReceiveToken(args.Token)
+	trace.RecordAction(ServerJoinedRecvd{args.ServerId})
+
+	// Only increment the chain length when it successfully joined
+	c.currChainLen++
+	// Unblock waiting join requests TODO should I unblock before getting the joined ack?
+	c.cond.Broadcast()
+	*reply = true
 	return nil
 }
 

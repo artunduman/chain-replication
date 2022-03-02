@@ -181,6 +181,7 @@ func NewServer() *Server {
 func (s *Server) Start(serverId uint8, coordAddr string, serverAddr string,
 	serverListenAddr string, clientListenAddr string, strace *tracing.Tracer) error {
 	var coordJoinReply JoinReply
+	var coordJoinedReply bool
 	var serverRegReply tracing.TracingToken
 
 	s.Tracer = strace
@@ -231,7 +232,7 @@ func (s *Server) Start(serverId uint8, coordAddr string, serverAddr string,
 	s.Trace.RecordAction(ServerJoining{s.Id})
 	err = s.Coord.Call(
 		"Coord.Join",
-		JoinArgs{serverId, serverListenAddr, nil},
+		JoinArgs{serverId, serverListenAddr, s.Trace.GenerateToken()},
 		&coordJoinReply,
 	)
 
@@ -250,7 +251,7 @@ func (s *Server) Start(serverId uint8, coordAddr string, serverAddr string,
 
 		err = s.PrevServer.Call(
 			"Server.RegisterNextServer",
-			RegisterServerArgs{s.Id, serverListenAddr, s.Trace.GenerateToken()},
+			RegisterServerArgs{s.Id, serverListenAddr, coordJoinReply.Token},
 			&serverRegReply,
 		)
 
@@ -271,7 +272,15 @@ func (s *Server) Start(serverId uint8, coordAddr string, serverAddr string,
 
 	fmt.Println("TODO", ackIpPort)
 
-	// TODO send `Joined` reply to Coord
+	// Send joined to coord
+	err = s.Coord.Call(
+		"Coord.Joined",
+		JoinedArgs{s.Id, s.Trace.GenerateToken()},
+		&coordJoinedReply,
+	)
+	if err != nil {
+		return err
+	}
 
 	go rpc.Accept(clientListener)
 	rpc.Accept(serverListener)
