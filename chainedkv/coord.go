@@ -228,11 +228,18 @@ func (c *Coord) Joined(args JoinedArgs, reply *bool) error {
 	if uint8(len(c.currChain)) == c.numServers {
 		trace.RecordAction(AllServersJoined{})
 		// Start heartbeats
-		nodes := make([]ServerNode, 0, len(c.discoveredServers))
+		nodes := make([]fchecker.Server, 0, len(c.discoveredServers))
 		for _, node := range c.discoveredServers {
-			nodes = append(nodes, *node)
+			nodes = append(nodes, fchecker.Server{
+				ServerId: node.serverId,
+				Addr:     node.ackIpPort,
+			})
 		}
-		notifyFailureCh, err := startFcheck(c.localIp, nodes, c.lostMsgsThresh)
+		notifyFailureCh, err := startFcheck(
+			c.localIp,
+			nodes,
+			c.lostMsgsThresh,
+		)
 		if err != nil {
 			log.Println("Coord.Joined: startFcheck failed:", err)
 			// Ignore for now, hopefully never fails
@@ -342,19 +349,13 @@ func (c *Coord) GetTail(args NodeRequest, reply *NodeResponse) error {
 	return nil
 }
 
-func startFcheck(localIp string, remoteServers []ServerNode, lostMsgThresh uint8) (notifyCh <-chan fchecker.FailureDetected, err error) {
+func startFcheck(localIp string, remoteServers []fchecker.Server, lostMsgThresh uint8) (notifyCh <-chan fchecker.FailureDetected, err error) {
 	// Convert servernode to fchecker.Server
-	var servers []fchecker.Server
-	for _, server := range remoteServers {
-		servers = append(servers, fchecker.Server{
-			ServerId: server.serverId, Addr: server.ackIpPort,
-		})
-	}
 	notifyCh, err = fchecker.Start(fchecker.StartStruct{
 		AckLocalIPAckLocalPort:       "",
 		EpochNonce:                   rand.Uint64(),
 		HBeatLocalIP:                 localIp,
-		HBeatRemoteIPHBeatRemotePort: servers,
+		HBeatRemoteIPHBeatRemotePort: remoteServers,
 		LostMsgThresh:                lostMsgThresh,
 	})
 	if err != nil {
