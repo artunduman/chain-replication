@@ -274,12 +274,14 @@ func (c *Coord) handleFailure(serverId uint8) {
 	if prevServerId == 0 {
 		prevAddr = nil
 	} else {
-		*prevAddr = c.discoveredServers[prevServerId].remoteIpPort
+		cp := c.discoveredServers[prevServerId].remoteIpPort
+		prevAddr = &cp
 	}
 	if nextServerId == 0 {
 		nextAddr = nil
 	} else {
-		*nextAddr = c.discoveredServers[nextServerId].remoteIpPort
+		cp := c.discoveredServers[nextServerId].remoteIpPort
+		nextAddr = &cp
 	}
 	// Send new servers
 	var tokenRecvd tracing.TracingToken
