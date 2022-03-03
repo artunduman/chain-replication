@@ -132,7 +132,8 @@ type Server struct {
 	Trace      *tracing.Trace
 	Coord      *rpc.Client
 	KVS        map[string]string
-	CurGId     uint64
+	nextGetGId uint64
+	nextPutGId uint64
 	mu         sync.Mutex
 }
 
@@ -173,12 +174,26 @@ type ServerArgs struct {
 	ServerIpPort string
 }
 
+type ServerFailArgs struct {
+	FailedServerId uint8
+	NewServerAddr  *string
+	NewServerId    uint8
+	Token          tracing.TracingToken
+}
+
+type UpdateGIdArgs struct {
+	nextPutGId uint64
+}
+
+const PutGIdIncrement uint64 = 1024
+
 func NewServer() *Server {
 	return &Server{}
 }
 
 func (s *Server) Start(serverId uint8, coordAddr string, serverAddr string,
 	serverListenAddr string, clientListenAddr string, strace *tracing.Tracer) error {
+
 	var coordJoinReply JoinReply
 	var coordJoinedReply interface{}
 	var serverRegReply tracing.TracingToken
@@ -190,6 +205,9 @@ func (s *Server) Start(serverId uint8, coordAddr string, serverAddr string,
 
 	s.Trace = s.Tracer.CreateTrace()
 	s.Trace.RecordAction(ServerStart{s.Id})
+
+	s.nextPutGId = 0
+	s.nextGetGId = 1
 
 	err := rpc.Register(s)
 
@@ -246,6 +264,8 @@ func (s *Server) Start(serverId uint8, coordAddr string, serverAddr string,
 		return err
 	}
 
+	s.Trace = s.Tracer.ReceiveToken(coordJoinReply.Token)
+
 	if coordJoinReply.PrevServerAddress == nil {
 		s.PrevServer = nil
 	} else {
@@ -257,7 +277,7 @@ func (s *Server) Start(serverId uint8, coordAddr string, serverAddr string,
 
 		err = s.PrevServer.Call(
 			"Server.RegisterNextServer",
-			RegisterServerArgs{s.Id, serverListenAddr, coordJoinReply.Token},
+			RegisterServerArgs{s.Id, serverListenAddr, s.Trace.GenerateToken()},
 			&serverRegReply,
 		)
 
@@ -303,46 +323,63 @@ func (s *Server) RegisterNextServer(args RegisterServerArgs, reply *tracing.Trac
 	return nil
 }
 
-type ServerFailArgs struct {
-	FailedServerId uint8
-	NewServerAddr  *string
-	NewServerId    uint8
-	Token          tracing.TracingToken
-}
-
 func (s *Server) ServerFailNewNextServer(args ServerFailArgs, reply *tracing.TracingToken) error {
 	trace := s.Tracer.ReceiveToken(args.Token)
 	trace.RecordAction(ServerFailRecvd{args.FailedServerId})
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	if args.NewServerAddr == nil {
 		s.NextServer = nil
 	} else {
 		nextServer, err := rpc.Dial("tcp", *args.NewServerAddr)
+
 		if err != nil {
 			return err
 		}
+
 		s.NextServer = nextServer
 		trace.RecordAction(NewFailoverSuccessor{args.NewServerId})
 	}
+
 	trace.RecordAction(ServerFailHandled{args.FailedServerId})
 	*reply = trace.GenerateToken()
+
+	if s.isHead() && s.isTail() {
+		s.nextGetGId = s.nextPutGId + 1
+	}
+
 	return nil
 }
 
 func (s *Server) ServerFailNewPrevServer(args ServerFailArgs, reply *tracing.TracingToken) error {
 	trace := s.Tracer.ReceiveToken(args.Token)
 	trace.RecordAction(ServerFailRecvd{args.FailedServerId})
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	if args.NewServerAddr == nil {
 		s.PrevServer = nil
 	} else {
 		prevServer, err := rpc.Dial("tcp", *args.NewServerAddr)
+
 		if err != nil {
 			return err
 		}
+
 		s.PrevServer = prevServer
 		trace.RecordAction(NewFailoverPredecessor{args.NewServerId})
 	}
+
 	trace.RecordAction(ServerFailHandled{args.FailedServerId})
 	*reply = trace.GenerateToken()
+
+	if s.isHead() && s.isTail() {
+		s.nextGetGId = s.nextPutGId + 1
+	}
+
 	return nil
 }
 
@@ -354,13 +391,22 @@ func (s *Server) isHead() bool {
 	return s.PrevServer == nil
 }
 
-func (s *Server) putFwd(trace *tracing.Trace, args PutArgs, reply *interface{}) error {
-	var putReply interface{}
+func (s *Server) putFwd(trace *tracing.Trace, args PutArgs) error {
+	var reply interface{}
 
-	trace.RecordAction(PutFwd{args.ClientId, args.OpId, args.GId, args.Key, args.Value})
+	s.nextPutGId = args.GId + PutGIdIncrement
+	s.nextGetGId = s.nextPutGId + 1
+
+	trace.RecordAction(PutFwd{
+		args.ClientId,
+		args.OpId,
+		args.GId,
+		args.Key,
+		args.Value,
+	})
 
 	args.Token = trace.GenerateToken()
-	err := s.NextServer.Call("Server.Put", args, &putReply)
+	err := s.NextServer.Call("Server.Put", args, &reply)
 
 	if err != nil {
 		return err
@@ -369,15 +415,26 @@ func (s *Server) putFwd(trace *tracing.Trace, args PutArgs, reply *interface{}) 
 	return nil
 }
 
-func (s *Server) putTail(trace *tracing.Trace, args PutArgs, reply *interface{}) error {
+func (s *Server) putTail(trace *tracing.Trace, args PutArgs) error {
 	var replyArgs ReplyArgs
-	var receivePutReply interface{}
+	var reply interface{}
 
 	client, err := rpc.Dial("tcp", args.ClientAddr)
 
 	if err != nil {
 		return err
 	}
+
+	if args.GId < s.nextPutGId {
+		s.UpdateGId(UpdateGIdArgs{
+			s.nextPutGId,
+		}, &reply)
+
+		return errors.New("Server.Put: GId not large enough")
+	}
+
+	s.nextPutGId = args.GId + PutGIdIncrement
+	s.nextGetGId = args.GId + 1
 
 	replyArgs.GId = args.GId
 	replyArgs.OpId = args.OpId
@@ -393,13 +450,34 @@ func (s *Server) putTail(trace *tracing.Trace, args PutArgs, reply *interface{})
 	})
 
 	replyArgs.Token = trace.GenerateToken()
-	err = client.Call("KVS.ReceivePutResult", replyArgs, &receivePutReply)
+	err = client.Call("KVS.ReceivePutResult", replyArgs, &reply)
 
 	if err != nil {
 		return err
 	}
 
 	return nil
+}
+
+func (s *Server) handlePut(trace *tracing.Trace, args PutArgs) error {
+	var err error
+
+	// Keep trying until server becomes tail
+	for {
+		s.mu.Unlock()
+
+		if s.isTail() {
+			err = s.putTail(trace, args)
+		} else {
+			err = s.putFwd(trace, args)
+		}
+
+		s.mu.Lock()
+
+		if err == nil {
+			return nil
+		}
+	}
 }
 
 func (s *Server) Put(args PutArgs, reply *interface{}) error {
@@ -413,29 +491,27 @@ func (s *Server) Put(args PutArgs, reply *interface{}) error {
 	if s.isHead() {
 		trace.RecordAction(PutRecvd{args.ClientId, args.OpId, args.Key, args.Value})
 
-		s.CurGId++
-		args.GId = s.CurGId
-		trace.RecordAction(PutOrdered{args.ClientId, args.OpId, args.GId, args.Key, args.Value})
+		args.GId = s.nextPutGId
 
-		if s.isTail() {
-			return s.putTail(trace, args, reply)
-		} else {
-			return s.putFwd(trace, args, reply)
-		}
+		trace.RecordAction(PutOrdered{
+			args.ClientId,
+			args.OpId,
+			args.GId,
+			args.Key,
+			args.Value,
+		})
+
+		return s.handlePut(trace, args)
 	}
 
 	trace.RecordAction(PutFwdRecvd{args.ClientId, args.OpId, args.GId, args.Key, args.Value})
 
-	if s.isTail() {
-		return s.putTail(trace, args, reply)
-	}
-
-	return s.putFwd(trace, args, reply)
+	return s.handlePut(trace, args)
 }
 
 func (s *Server) Get(args GetArgs, reply *interface{}) error {
 	var replyArgs ReplyArgs
-	var receiveGetReply interface{}
+	var rpcReply interface{}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -453,27 +529,64 @@ func (s *Server) Get(args GetArgs, reply *interface{}) error {
 		return err
 	}
 
-	replyArgs.GId = s.CurGId
+	replyArgs.GId = s.nextGetGId
 	replyArgs.OpId = args.OpId
 	replyArgs.Key = args.Key
 	replyArgs.Value = s.KVS[args.Key]
 
+	if s.nextGetGId == s.nextPutGId {
+		s.UpdateGId(UpdateGIdArgs{
+			s.nextPutGId + PutGIdIncrement,
+		}, &rpcReply)
+	}
+
+	s.nextGetGId++
+
+	trace.RecordAction(GetOrdered{
+		args.ClientId,
+		args.OpId,
+		replyArgs.GId,
+		args.Key,
+	})
+
 	trace.RecordAction(GetResult{
 		args.ClientId,
 		args.OpId,
-		s.CurGId,
+		replyArgs.GId,
 		args.Key,
-		s.KVS[args.Key],
+		replyArgs.Value,
 	})
 
 	replyArgs.Token = trace.GenerateToken()
-	err = client.Call("KVS.ReceiveGetResult", replyArgs, &receiveGetReply)
+	err = client.Call("KVS.ReceiveGetResult", replyArgs, &rpcReply)
 
 	if err != nil {
 		return err
 	}
 
 	return nil
+}
+
+func (s *Server) UpdateGId(updateGIdArgs UpdateGIdArgs, reply *interface{}) {
+	s.nextPutGId = updateGIdArgs.nextPutGId
+	s.nextGetGId = s.nextPutGId + 1
+
+	// Keep trying until server becomes head
+	for !s.isHead() {
+		s.mu.Unlock()
+
+		err := s.PrevServer.Call(
+			"Server.UpdateGId",
+			UpdateGIdArgs{s.nextPutGId},
+			&reply,
+		)
+
+		s.mu.Lock()
+
+		if err == nil {
+			break
+		}
+	}
 }
 
 func (s *Server) startFcheck(serverAddr string) (string, error) {
