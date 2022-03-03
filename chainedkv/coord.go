@@ -295,9 +295,8 @@ func (c *Coord) handleFailure(serverId uint8) {
 			trace.GenerateToken(),
 		}, &tokenRecvd)
 		if err != nil {
-			// Hopefully shouldn't happen
+			// Prev died too, ignore
 			log.Println("Coord.handleFailure: prevClient.Call failed:", err)
-			return
 		}
 		trace = c.tracer.ReceiveToken(tokenRecvd)
 		trace.RecordAction(ServerFailHandledRecvd{serverId, prevServerId})
@@ -311,8 +310,8 @@ func (c *Coord) handleFailure(serverId uint8) {
 			trace.GenerateToken(),
 		}, &tokenRecvd)
 		if err != nil {
+			// Next died too, ignore
 			log.Println("Coord.handleFailure: nextClient.Call failed:", err)
-			return
 		}
 		trace = c.tracer.ReceiveToken(tokenRecvd)
 		trace.RecordAction(ServerFailHandledRecvd{serverId, nextServerId})
