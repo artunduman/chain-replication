@@ -4,7 +4,6 @@ import (
 	fchecker "cs.ubc.ca/cpsc416/a3/fcheck"
 	"errors"
 	"log"
-	"math"
 	"math/rand"
 	"net"
 	"net/rpc"
@@ -118,7 +117,7 @@ func (c *Coord) Start(clientAPIListenAddr string, serverAPIListenAddr string, lo
 	c.tracer = ctrace
 	c.numServers = numServers
 	c.lostMsgsThresh = lostMsgsThresh
-	host, _, err := net.SplitHostPort(clientAPIListenAddr) // TODO make sure clientAPI is appropriate
+	host, _, err := net.SplitHostPort(clientAPIListenAddr)
 	if err != nil {
 		return err
 	}
@@ -263,10 +262,10 @@ func (c *Coord) handleFailure(serverId uint8) {
 	defer c.cond.L.Unlock()
 	trace := c.tracer.CreateTrace()
 	trace.RecordAction(ServerFail{serverId})
-	c.currChain = append(c.currChain[:serverId-1], c.currChain[serverId:]...)
-	c.discoveredServers[serverId].joined = false
 
-	prevServerId, nextServerId := c.getPrevNextActiveServers(serverId)
+	prevServerId, nextServerId, newChain := c.getPrevNextActiveServers(serverId)
+	c.currChain = newChain
+	c.discoveredServers[serverId].joined = false
 
 	// Set addresses to send to servers
 	var prevAddr *string
@@ -283,10 +282,11 @@ func (c *Coord) handleFailure(serverId uint8) {
 		cp := c.discoveredServers[nextServerId].remoteIpPort
 		nextAddr = &cp
 	}
+
 	// Send new servers
 	var tokenRecvd tracing.TracingToken
-	// TODO parallelize
-	if prevServerId != 0 {
+	// Nit: parallelize
+	if prevAddr != nil {
 		prevClient := c.discoveredServers[prevServerId].client
 		err := prevClient.Call("Server.ServerFailNewNextServer", ServerFailArgs{
 			serverId,
@@ -295,13 +295,14 @@ func (c *Coord) handleFailure(serverId uint8) {
 			trace.GenerateToken(),
 		}, &tokenRecvd)
 		if err != nil {
+			// Hopefully shouldn't happen
 			log.Println("Coord.handleFailure: prevClient.Call failed:", err)
-			return // TODO handle this somehow
+			return
 		}
 		trace = c.tracer.ReceiveToken(tokenRecvd)
 		trace.RecordAction(ServerFailHandledRecvd{serverId, prevServerId})
 	}
-	if nextServerId != 0 {
+	if nextAddr != nil {
 		nextClient := c.discoveredServers[nextServerId].client
 		err := nextClient.Call("Server.ServerFailNewPrevServer", ServerFailArgs{
 			serverId,
@@ -311,7 +312,7 @@ func (c *Coord) handleFailure(serverId uint8) {
 		}, &tokenRecvd)
 		if err != nil {
 			log.Println("Coord.handleFailure: nextClient.Call failed:", err)
-			return // TODO handle this somehow
+			return
 		}
 		trace = c.tracer.ReceiveToken(tokenRecvd)
 		trace.RecordAction(ServerFailHandledRecvd{serverId, nextServerId})
@@ -319,21 +320,20 @@ func (c *Coord) handleFailure(serverId uint8) {
 	trace.RecordAction(NewChain{c.currChain})
 }
 
-func (c *Coord) getPrevNextActiveServers(serverId uint8) (uint8, uint8) {
-	prevServerId := uint8(0)
-	nextServerId := uint8(math.MaxUint8)
-	for _, currServer := range c.discoveredServers {
-		if currServer.serverId < serverId && currServer.joined && currServer.serverId > prevServerId {
-			prevServerId = currServer.serverId
-		}
-		if currServer.serverId > serverId && currServer.joined && currServer.serverId < nextServerId {
-			nextServerId = currServer.serverId
+func (c *Coord) getPrevNextActiveServers(serverId uint8) (uint8, uint8, []uint8) {
+	for i, id := range c.currChain {
+		if id == serverId {
+			newChain := append(c.currChain[:i], c.currChain[i+1:]...)
+			if i == 0 {
+				return 0, c.currChain[i+1], newChain
+			} else if i == len(c.currChain)-1 {
+				return c.currChain[i-1], 0, newChain
+			} else {
+				return c.currChain[i-1], c.currChain[i+1], newChain
+			}
 		}
 	}
-	if nextServerId == math.MaxUint8 {
-		nextServerId = 0
-	}
-	return prevServerId, nextServerId
+	return 0, 0, c.currChain
 }
 
 func (c *Coord) GetHead(args NodeRequest, reply *NodeResponse) error {
