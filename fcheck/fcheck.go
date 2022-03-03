@@ -73,7 +73,7 @@ var stopHBeatMap map[uint8]chan bool = make(map[uint8]chan bool)
 var notifyCh chan FailureDetected
 
 // Starts the fcheck library.
-func Start(arg StartStruct) (notifyCh <-chan FailureDetected, err error) {
+func Start(arg StartStruct) (<-chan FailureDetected, error) {
 	if isActive {
 		return nil, errors.New("fcheck is already monitoring")
 	}
@@ -90,13 +90,15 @@ func Start(arg StartStruct) (notifyCh <-chan FailureDetected, err error) {
 		return nil, nil
 	}
 
-	err = ackInit(arg)
+	if arg.AckLocalIPAckLocalPort != "" {
+		err := ackInit(arg)
 
-	if err != nil {
-		return nil, err
+		if err != nil {
+			return nil, err
+		}
 	}
 
-	err = hbeatInit(arg)
+	err := hbeatInit(arg)
 
 	if err != nil {
 		writeStopChannels()
@@ -256,6 +258,8 @@ func ack(conn *net.UDPConn) {
 			if rs.err != nil {
 				continue
 			}
+
+			time.Sleep(1 * time.Second)
 
 			hbeatMessage, _ := decodeHBeatMessage(rs.recvBuf, rs.len)
 
