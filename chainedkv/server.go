@@ -180,7 +180,7 @@ func NewServer() *Server {
 func (s *Server) Start(serverId uint8, coordAddr string, serverAddr string,
 	serverListenAddr string, clientListenAddr string, strace *tracing.Tracer) error {
 	var coordJoinReply JoinReply
-	var coordJoinedReply bool
+	var coordJoinedReply interface{}
 	var serverRegReply tracing.TracingToken
 
 	s.Tracer = strace
@@ -270,12 +270,12 @@ func (s *Server) Start(serverId uint8, coordAddr string, serverAddr string,
 
 	s.Trace.RecordAction(ServerJoined{s.Id})
 
-	// Send joined to coord
 	err = s.Coord.Call(
 		"Coord.Joined",
 		JoinedArgs{s.Id, s.Trace.GenerateToken()},
 		&coordJoinedReply,
 	)
+
 	if err != nil {
 		return err
 	}
