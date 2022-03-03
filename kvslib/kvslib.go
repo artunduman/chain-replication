@@ -144,7 +144,7 @@ func (d *KVS) Start(localTracer *tracing.Tracer, clientId string, coordIPPort st
 	d.Data.ChCapacity = chCapacity
 	d.Data.CurrOpId = 0
 	d.Data.ChCount = 0
-	d.Data.Done = make(chan bool)
+	d.Data.Done = make(chan bool, 1)
 	d.Data.PendingRequests = make(map[uint32]Request)
 	d.Data.HeadServerInfo.LocalPortIp = localHeadServerIPPort
 	d.Data.TailServerInfo.LocalPortIp = localTailServerIPPort
@@ -214,16 +214,27 @@ func (d *KVS) handleGet(opId uint32, request Request) {
 		Token:      trace.GenerateToken(),
 	}
 
-	// Invoke Get
 	for {
+		d.Cond.L.Unlock()
+
+		// Invoke Get
 		err := d.Clients.TailClient.Call(
 			"Server.Get",
 			getArgs,
 			&getReply,
 		)
 
+		d.Cond.L.Lock()
+
 		if err != nil {
 			d.getTail()
+
+			// Check if the request successfully completed even
+			// though the tail server failed to reply. If so, we
+			// simply return since the command has completed
+			if _, ok := d.Data.PendingRequests[opId]; !ok {
+				return
+			}
 		} else {
 			break
 		}
@@ -251,6 +262,8 @@ func (d *KVS) handlePut(opId uint32, request Request) {
 	}
 
 	for {
+		d.Cond.L.Unlock()
+
 		// Invoke Put
 		err := d.Clients.HeadClient.Call(
 			"Server.Put",
@@ -258,8 +271,17 @@ func (d *KVS) handlePut(opId uint32, request Request) {
 			&putReply,
 		)
 
+		d.Cond.L.Lock()
+
 		if err != nil {
 			d.getHead()
+
+			// Check if the request successfully completed even
+			// though the head server failed to reply. If so, we
+			// simply return since the command has completed
+			if _, ok := d.Data.PendingRequests[opId]; !ok {
+				return
+			}
 		} else {
 			break
 		}
@@ -499,5 +521,7 @@ func (d *KVS) Stop() {
 	}
 
 	d.Data.Done <- true
+	d.Cond.Broadcast()
+
 	*d = *NewKVS()
 }
