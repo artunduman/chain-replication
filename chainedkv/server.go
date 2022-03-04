@@ -236,17 +236,23 @@ func (s *Server) Start(serverId uint8, coordAddr string, serverAddr string,
 		return err
 	}
 
+	defer clientListener.Close()
+
 	serverListener, err := net.ListenTCP("tcp", tcpAddrServer)
 
 	if err != nil {
 		return err
 	}
 
+	defer serverListener.Close()
+
 	s.Coord, err = util.GetRPCClient(serverAddr, coordAddr)
 
 	if err != nil {
 		return err
 	}
+
+	defer s.Coord.Close()
 
 	// Start listening for heartbeats
 	ackIpPort, err := s.startFcheck(serverAddr)

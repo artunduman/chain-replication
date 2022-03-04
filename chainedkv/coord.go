@@ -191,6 +191,12 @@ func (c *Coord) Start(clientAPIListenAddr string, serverAPIListenAddr string,
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
 	<-sig
 
+	for _, ds := range c.DiscoveredServers {
+		if ds.Client != nil {
+			ds.Client.Close()
+		}
+	}
+
 	return nil
 }
 
