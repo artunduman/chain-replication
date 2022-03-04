@@ -342,7 +342,9 @@ func (c *Coord) handleFailure(serverId uint8) {
 func (c *Coord) getPrevNextActiveServers(serverId uint8) (uint8, uint8, []uint8) {
 	for i, id := range c.CurrChain {
 		if id == serverId {
-			newChain := append(c.CurrChain[:i], c.CurrChain[i+1:]...)
+			newChain := make([]uint8, len(c.CurrChain))
+			copy(newChain, c.CurrChain)
+			newChain = append(newChain[:i], newChain[i+1:]...)
 
 			log.Println("newChain:", newChain)
 
