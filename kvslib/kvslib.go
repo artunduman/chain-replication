@@ -192,7 +192,10 @@ func (d *KVS) Start(localTracer *tracing.Tracer, clientId string, coordIPPort st
 		return nil, err
 	}
 
-	go d.handleOps()
+	opReady := make(chan bool)
+	go d.handleOps(opReady)
+	<-opReady
+
 	return d.NotifyCh, nil
 }
 
@@ -288,7 +291,7 @@ func (d *KVS) handlePut(opId uint32, request Request) {
 	}
 }
 
-func (d *KVS) handleOps() {
+func (d *KVS) handleOps(opReady chan<- bool) {
 	nextOpId := uint32(0)
 
 	d.getHead()
@@ -296,6 +299,8 @@ func (d *KVS) handleOps() {
 
 	d.Cond.L.Lock()
 	defer d.Cond.L.Unlock()
+
+	opReady <- true
 
 	for {
 		// Wait until expected next opId arrives

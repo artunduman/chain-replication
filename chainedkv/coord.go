@@ -6,7 +6,10 @@ import (
 	"math/rand"
 	"net"
 	"net/rpc"
+	"os"
+	"os/signal"
 	"sync"
+	"syscall"
 
 	fchecker "cs.ubc.ca/cpsc416/a3/fcheck"
 
@@ -182,7 +185,11 @@ func (c *Coord) Start(clientAPIListenAddr string, serverAPIListenAddr string,
 	defer serverListener.Close()
 
 	go rpc.Accept(clientListener)
-	rpc.Accept(serverListener)
+	go rpc.Accept(serverListener)
+
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
+	<-sig
 
 	return nil
 }
@@ -355,7 +362,7 @@ func (c *Coord) GetHead(args NodeRequest, reply *NodeResponse) error {
 	trace.RecordAction(HeadReqRecvd{args.ClientId})
 
 	// Wait until all servers have been added
-	for uint8(len(c.CurrChain)) != c.NumServers {
+	for uint8(len(c.DiscoveredServers)) != c.NumServers {
 		c.Cond.Wait()
 	}
 
@@ -376,7 +383,7 @@ func (c *Coord) GetTail(args NodeRequest, reply *NodeResponse) error {
 	trace.RecordAction(TailReqRecvd{args.ClientId})
 
 	// Wait until all servers have been added
-	for uint8(len(c.CurrChain)) != c.NumServers {
+	for uint8(len(c.DiscoveredServers)) != c.NumServers {
 		c.Cond.Wait()
 	}
 

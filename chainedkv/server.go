@@ -4,8 +4,11 @@ import (
 	"errors"
 	"net"
 	"net/rpc"
+	"os"
+	"os/signal"
 	"strconv"
 	"sync"
+	"syscall"
 
 	fchecker "cs.ubc.ca/cpsc416/a3/fcheck"
 	"cs.ubc.ca/cpsc416/a3/util"
@@ -206,8 +209,8 @@ func (s *Server) Start(serverId uint8, coordAddr string, serverAddr string,
 	s.Trace = s.Tracer.CreateTrace()
 	s.Trace.RecordAction(ServerStart{s.Id})
 
-	s.nextPutGId = 0
-	s.nextGetGId = 1
+	s.nextPutGId = PutGIdIncrement
+	s.nextGetGId = 0
 
 	err := rpc.Register(s)
 
@@ -301,7 +304,11 @@ func (s *Server) Start(serverId uint8, coordAddr string, serverAddr string,
 	}
 
 	go rpc.Accept(clientListener)
-	rpc.Accept(serverListener)
+	go rpc.Accept(serverListener)
+
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
+	<-sig
 
 	return nil
 }
@@ -348,6 +355,7 @@ func (s *Server) ServerFailNewNextServer(args ServerFailArgs, reply *tracing.Tra
 
 	if s.isHead() && s.isTail() {
 		s.nextGetGId = s.nextPutGId + 1
+		s.nextPutGId += PutGIdIncrement
 	}
 
 	return nil
@@ -378,6 +386,7 @@ func (s *Server) ServerFailNewPrevServer(args ServerFailArgs, reply *tracing.Tra
 
 	if s.isHead() && s.isTail() {
 		s.nextGetGId = s.nextPutGId + 1
+		s.nextPutGId += PutGIdIncrement
 	}
 
 	return nil
@@ -393,9 +402,6 @@ func (s *Server) isHead() bool {
 
 func (s *Server) putFwd(trace *tracing.Trace, args PutArgs) error {
 	var reply interface{}
-
-	s.nextPutGId = args.GId + PutGIdIncrement
-	s.nextGetGId = s.nextPutGId + 1
 
 	trace.RecordAction(PutFwd{
 		args.ClientId,
@@ -425,17 +431,6 @@ func (s *Server) putTail(trace *tracing.Trace, args PutArgs) error {
 		return err
 	}
 
-	if args.GId < s.nextPutGId {
-		s.UpdateGId(UpdateGIdArgs{
-			s.nextPutGId,
-		}, &reply)
-
-		return errors.New("Server.Put: GId not large enough")
-	}
-
-	s.nextPutGId = args.GId + PutGIdIncrement
-	s.nextGetGId = args.GId + 1
-
 	replyArgs.GId = args.GId
 	replyArgs.OpId = args.OpId
 	replyArgs.Key = args.Key
@@ -461,6 +456,18 @@ func (s *Server) putTail(trace *tracing.Trace, args PutArgs) error {
 
 func (s *Server) handlePut(trace *tracing.Trace, args PutArgs) error {
 	var err error
+	var reply interface{}
+
+	if args.GId < s.nextPutGId {
+		s.updateGId(UpdateGIdArgs{
+			s.nextPutGId,
+		}, &reply)
+
+		return errors.New("Server.Put: GId not large enough")
+	}
+
+	s.nextGetGId = args.GId + 1
+	s.nextPutGId = args.GId + PutGIdIncrement
 
 	// Keep trying until server becomes tail
 	for {
@@ -535,7 +542,7 @@ func (s *Server) Get(args GetArgs, reply *interface{}) error {
 	replyArgs.Value = s.KVS[args.Key]
 
 	if s.nextGetGId == s.nextPutGId {
-		s.UpdateGId(UpdateGIdArgs{
+		s.updateGId(UpdateGIdArgs{
 			s.nextPutGId + PutGIdIncrement,
 		}, &rpcReply)
 	}
@@ -567,21 +574,25 @@ func (s *Server) Get(args GetArgs, reply *interface{}) error {
 	return nil
 }
 
-func (s *Server) UpdateGId(updateGIdArgs UpdateGIdArgs, reply *interface{}) {
+func (s *Server) UpdateGId(updateGIdArgs UpdateGIdArgs, reply *interface{}) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.updateGId(updateGIdArgs, reply)
+
+	return nil
+}
+
+func (s *Server) updateGId(updateGIdArgs UpdateGIdArgs, reply *interface{}) {
 	s.nextPutGId = updateGIdArgs.nextPutGId
-	s.nextGetGId = s.nextPutGId + 1
 
 	// Keep trying until server becomes head
 	for !s.isHead() {
-		s.mu.Unlock()
-
 		err := s.PrevServer.Call(
 			"Server.UpdateGId",
 			UpdateGIdArgs{s.nextPutGId},
 			&reply,
 		)
-
-		s.mu.Lock()
 
 		if err == nil {
 			break
