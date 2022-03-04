@@ -1,6 +1,7 @@
 package chainedkv
 
 import (
+	fchecker "cs.ubc.ca/cpsc416/a3/fcheck"
 	"errors"
 	"log"
 	"math/rand"
@@ -10,8 +11,6 @@ import (
 	"os/signal"
 	"sync"
 	"syscall"
-
-	fchecker "cs.ubc.ca/cpsc416/a3/fcheck"
 
 	"github.com/DistributedClocks/tracing"
 )
@@ -78,7 +77,6 @@ type ServerNode struct {
 	RemoteIpPort string
 	Client       *rpc.Client
 	AckIpPort    string
-	Joined       bool
 }
 
 type NodeRequest struct {
@@ -218,7 +216,6 @@ func (c *Coord) Join(args JoinArgs, reply *JoinReply) error {
 		RemoteIpPort: args.ServerAddr,
 		Client:       client,
 		AckIpPort:    args.AckIpPort,
-		Joined:       false,
 	}
 
 	// Wait until the server is the next in the chain
@@ -258,7 +255,6 @@ func (c *Coord) Joined(args JoinedArgs, reply *interface{}) error {
 	trace.RecordAction(ServerJoinedRecvd{args.ServerId})
 
 	c.CurrChain = append(c.CurrChain, args.ServerId)
-	c.DiscoveredServers[args.ServerId].Joined = true
 	c.Trace.RecordAction(NewChain{c.CurrChain})
 
 	c.Cond.Broadcast()
@@ -288,13 +284,15 @@ func (c *Coord) handleFailure(serverId uint8) {
 
 	c.Cond.L.Lock()
 	defer c.Cond.L.Unlock()
-
+	// One server can't fail, exit
+	if len(c.CurrChain) == 1 {
+		log.Fatalf("Server %d failed, when there is only one server in the chain", serverId)
+	}
 	c.Trace.RecordAction(ServerFail{serverId})
 
 	prevServerId, nextServerId, newChain := c.getPrevNextActiveServers(serverId)
 
 	c.CurrChain = newChain
-	c.DiscoveredServers[serverId].Joined = false
 
 	if prevServerId == 0 {
 		prevAddr = nil
@@ -340,6 +338,7 @@ func (c *Coord) handleFailure(serverId uint8) {
 	c.Trace.RecordAction(NewChain{c.CurrChain})
 }
 
+// Pre: serverId is in the chain and chain has length > 1
 func (c *Coord) getPrevNextActiveServers(serverId uint8) (uint8, uint8, []uint8) {
 	for i, id := range c.CurrChain {
 		if id == serverId {
