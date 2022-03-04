@@ -166,18 +166,20 @@ func (c *Coord) Start(clientAPIListenAddr string, serverAPIListenAddr string,
 	}
 
 	clientListener, err := net.ListenTCP("tcp", tcpAddrClient)
+
+	if err != nil {
+		return err
+	}
+
 	defer clientListener.Close()
 
-	if err != nil {
-		return err
-	}
-
 	serverListener, err := net.ListenTCP("tcp", tcpAddrServer)
-	defer serverListener.Close()
 
 	if err != nil {
 		return err
 	}
+
+	defer serverListener.Close()
 
 	go rpc.Accept(clientListener)
 	rpc.Accept(serverListener)
