@@ -104,19 +104,18 @@ type Request struct {
 }
 
 type LocalData struct {
-	Tracer           *tracing.Tracer
-	Trace            *tracing.Trace
-	PendingRequests  map[uint32]Request
-	ClientId         string
-	ClientIPPort     string
-	LocalCoordIPPort string
-	ChCapacity       int
-	HeadServerInfo   ServerInfo
-	TailServerInfo   ServerInfo
-	CurrOpId         uint32
-	ChCount          int
-	Done             chan bool
-	Listener         net.Listener
+	Tracer          *tracing.Tracer
+	Trace           *tracing.Trace
+	PendingRequests map[uint32]Request
+	ClientId        string
+	ClientIPPort    string
+	ChCapacity      int
+	HeadServerInfo  ServerInfo
+	TailServerInfo  ServerInfo
+	CurrOpId        uint32
+	ChCount         int
+	Done            chan bool
+	Listener        net.Listener
 }
 
 func NewKVS() *KVS {
@@ -140,7 +139,6 @@ func (d *KVS) Start(localTracer *tracing.Tracer, clientId string, coordIPPort st
 	d.Data.Tracer = localTracer
 	d.Data.Trace = localTracer.CreateTrace()
 	d.Data.ClientId = clientId
-	d.Data.LocalCoordIPPort = localCoordIPPort
 	d.Data.ChCapacity = chCapacity
 	d.Data.CurrOpId = 0
 	d.Data.ChCount = 0

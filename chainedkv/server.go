@@ -120,6 +120,7 @@ type ServerConfig struct {
 	ServerId          uint8
 	CoordAddr         string
 	ServerAddr        string
+	ServerServerAddr  string
 	ServerListenAddr  string
 	ClientListenAddr  string
 	TracingServerAddr string
@@ -128,16 +129,17 @@ type ServerConfig struct {
 }
 
 type Server struct {
-	Id         uint8
-	NextServer *rpc.Client
-	PrevServer *rpc.Client
-	Tracer     *tracing.Tracer
-	Trace      *tracing.Trace
-	Coord      *rpc.Client
-	KVS        map[string]string
-	nextGetGId uint64
-	nextPutGId uint64
-	mu         sync.Mutex
+	Id               uint8
+	NextServer       *rpc.Client
+	PrevServer       *rpc.Client
+	Tracer           *tracing.Tracer
+	Trace            *tracing.Trace
+	Coord            *rpc.Client
+	KVS              map[string]string
+	nextGetGId       uint64
+	nextPutGId       uint64
+	mu               sync.Mutex
+	ServerServerAddr string
 }
 
 type RegisterServerArgs struct {
@@ -195,7 +197,8 @@ func NewServer() *Server {
 }
 
 func (s *Server) Start(serverId uint8, coordAddr string, serverAddr string,
-	serverListenAddr string, clientListenAddr string, strace *tracing.Tracer) error {
+	serverServerAddr string, serverListenAddr string, clientListenAddr string,
+	strace *tracing.Tracer) error {
 
 	var coordJoinReply JoinReply
 	var coordJoinedReply interface{}
@@ -205,6 +208,7 @@ func (s *Server) Start(serverId uint8, coordAddr string, serverAddr string,
 	s.Id = serverId
 	s.NextServer = nil
 	s.KVS = make(map[string]string)
+	s.ServerServerAddr = serverServerAddr
 
 	s.Trace = s.Tracer.CreateTrace()
 	s.Trace.RecordAction(ServerStart{s.Id})
@@ -278,7 +282,7 @@ func (s *Server) Start(serverId uint8, coordAddr string, serverAddr string,
 	if coordJoinReply.PrevServerAddress == nil {
 		s.PrevServer = nil
 	} else {
-		s.PrevServer, err = rpc.Dial("tcp", *coordJoinReply.PrevServerAddress)
+		s.PrevServer, err = util.GetRPCClient(serverServerAddr, *coordJoinReply.PrevServerAddress)
 
 		if err != nil {
 			return err
@@ -322,7 +326,10 @@ func (s *Server) Start(serverId uint8, coordAddr string, serverAddr string,
 func (s *Server) RegisterNextServer(args RegisterServerArgs, reply *tracing.TracingToken) error {
 	trace := s.Tracer.ReceiveToken(args.Token)
 
-	nextServer, err := rpc.Dial("tcp", args.NextServerAddress)
+	nextServer, err := util.SplitAndGetRPCClient(
+		s.ServerServerAddr,
+		args.NextServerAddress,
+	)
 
 	if err != nil {
 		return err
@@ -346,7 +353,10 @@ func (s *Server) ServerFailNewNextServer(args ServerFailArgs, reply *tracing.Tra
 	if args.NewServerAddr == nil {
 		s.NextServer = nil
 	} else {
-		nextServer, err := rpc.Dial("tcp", *args.NewServerAddr)
+		nextServer, err := util.SplitAndGetRPCClient(
+			s.ServerServerAddr,
+			*args.NewServerAddr,
+		)
 
 		if err != nil {
 			return err
@@ -377,7 +387,10 @@ func (s *Server) ServerFailNewPrevServer(args ServerFailArgs, reply *tracing.Tra
 	if args.NewServerAddr == nil {
 		s.PrevServer = nil
 	} else {
-		prevServer, err := rpc.Dial("tcp", *args.NewServerAddr)
+		prevServer, err := util.SplitAndGetRPCClient(
+			s.ServerServerAddr,
+			*args.NewServerAddr,
+		)
 
 		if err != nil {
 			return err
@@ -431,7 +444,10 @@ func (s *Server) putTail(trace *tracing.Trace, args PutArgs) error {
 	var replyArgs ReplyArgs
 	var reply interface{}
 
-	client, err := rpc.Dial("tcp", args.ClientAddr)
+	client, err := util.SplitAndGetRPCClient(
+		s.ServerServerAddr,
+		args.ClientAddr,
+	)
 
 	if err != nil {
 		return err
@@ -536,7 +552,10 @@ func (s *Server) Get(args GetArgs, reply *interface{}) error {
 	trace := s.Tracer.ReceiveToken(args.Token)
 	trace.RecordAction(GetRecvd{args.ClientId, args.OpId, args.Key})
 
-	client, err := rpc.Dial("tcp", args.ClientAddr)
+	client, err := util.SplitAndGetRPCClient(
+		s.ServerServerAddr,
+		args.ClientAddr,
+	)
 
 	if err != nil {
 		return err
