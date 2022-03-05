@@ -1,10 +1,11 @@
 package main
 
 import (
+	"log"
+
 	"cs.ubc.ca/cpsc416/a3/chainedkv"
 	"cs.ubc.ca/cpsc416/a3/util"
 	"github.com/DistributedClocks/tracing"
-	"log"
 )
 
 func main() {
@@ -19,7 +20,7 @@ func main() {
 		Secret:         config.Secret,
 	})
 	server := chainedkv.Server{}
-	err = server.Start(config.ServerId, config.CoordAddr, config.ServerAddr, config.ServerListenAddr, config.ClientListenAddr, stracer)
+	err = server.Start(config.ServerId, config.CoordAddr, config.ServerAddr, config.ServerServerAddr, config.ServerListenAddr, config.ClientListenAddr, stracer)
 	if err != nil {
 		log.Fatalf("Error starting server: %s", err)
 	}

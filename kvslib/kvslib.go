@@ -78,7 +78,7 @@ type ResultStruct struct {
 // Local
 
 type KVS struct {
-	Mutex    *sync.Mutex
+	Cond     *sync.Cond
 	NotifyCh NotifyChannel
 	Clients  RPCClients
 	Data     LocalData
@@ -98,36 +98,28 @@ type ServerInfo struct {
 
 type Request struct {
 	Key    string
-	Value  string
+	Value  *string
 	Tracer *tracing.Tracer
 	Trace  *tracing.Trace
 }
 
 type LocalData struct {
-	Tracer             *tracing.Tracer
-	Trace              *tracing.Trace
-	PendingGetRequests map[uint32]Request
-	PendingPutRequests map[uint32]Request
-	ClientId           string
-	ClientIPPort       string
-	LocalCoordIPPort   string
-	ChCapacity         int
-	HeadServerInfo     ServerInfo
-	TailServerInfo     ServerInfo
-	CurrOpId           uint32
-	ChCount            int
-	DoneCh             chan *rpc.Call
-	TerminateDoneCh    chan bool
-	Listener           net.Listener
+	Tracer          *tracing.Tracer
+	Trace           *tracing.Trace
+	PendingRequests map[uint32]Request
+	ClientId        string
+	ClientIPPort    string
+	ChCapacity      int
+	HeadServerInfo  ServerInfo
+	TailServerInfo  ServerInfo
+	CurrOpId        uint32
+	ChCount         int
+	Done            chan bool
+	Listener        net.Listener
 }
 
 func NewKVS() *KVS {
-	return &KVS{
-		Mutex:    &sync.Mutex{},
-		NotifyCh: nil,
-		Clients:  RPCClients{},
-		Data:     LocalData{},
-	}
+	return &KVS{}
 }
 
 // Start Starts the instance of KVS to use for connecting to the system with the given coord's IP:port.
@@ -141,25 +133,19 @@ func (d *KVS) Start(localTracer *tracing.Tracer, clientId string, coordIPPort st
 	localCoordIPPort string, localHeadServerIPPort string,
 	localTailServerIPPort string, chCapacity int) (NotifyChannel, error) {
 
-	var servResp chainedkv.NodeResponse
-
-	// Reserve critical section
-	d.Mutex.Lock()
-	defer d.Mutex.Unlock()
-
 	// Populate KVS
+	d.Cond = sync.NewCond(&sync.Mutex{})
 	d.NotifyCh = make(NotifyChannel, chCapacity)
 	d.Data.Tracer = localTracer
 	d.Data.Trace = localTracer.CreateTrace()
 	d.Data.ClientId = clientId
-	d.Data.LocalCoordIPPort = localCoordIPPort
 	d.Data.ChCapacity = chCapacity
 	d.Data.CurrOpId = 0
 	d.Data.ChCount = 0
-	d.Data.DoneCh = make(chan *rpc.Call, chCapacity)
-	d.Data.TerminateDoneCh = make(chan bool)
-	d.Data.PendingGetRequests = make(map[uint32]Request)
-	d.Data.PendingPutRequests = make(map[uint32]Request)
+	d.Data.Done = make(chan bool, 1)
+	d.Data.PendingRequests = make(map[uint32]Request)
+	d.Data.HeadServerInfo.LocalPortIp = localHeadServerIPPort
+	d.Data.TailServerInfo.LocalPortIp = localTailServerIPPort
 
 	d.Data.Trace.RecordAction(KvslibStart{ClientId: clientId})
 
@@ -204,40 +190,183 @@ func (d *KVS) Start(localTracer *tracing.Tracer, clientId string, coordIPPort st
 		return nil, err
 	}
 
-	err = d.getHead(&servResp)
+	opReady := make(chan bool)
+	go d.handleOps(opReady)
+	<-opReady
 
-	if err != nil {
-		return nil, err
-	}
-
-	d.Data.HeadServerInfo.ServerId = servResp.ServerId
-	d.Data.HeadServerInfo.LocalPortIp = localHeadServerIPPort
-	d.Data.HeadServerInfo.RemotePortIp = servResp.ServerIpPort
-
-	d.Clients.HeadClient, err = util.GetRPCClient(localHeadServerIPPort, servResp.ServerIpPort)
-
-	if err != nil {
-		return nil, err
-	}
-
-	err = d.getTail(&servResp)
-
-	if err != nil {
-		return nil, err
-	}
-
-	d.Data.TailServerInfo.ServerId = servResp.ServerId
-	d.Data.TailServerInfo.LocalPortIp = localTailServerIPPort
-	d.Data.TailServerInfo.RemotePortIp = servResp.ServerIpPort
-
-	d.Clients.TailClient, err = util.GetRPCClient(localTailServerIPPort, servResp.ServerIpPort)
-
-	if err != nil {
-		return nil, err
-	}
-
-	go d.launchDoneChannel()
 	return d.NotifyCh, nil
+}
+
+func (d *KVS) handleGet(opId uint32, request Request) {
+	var err error
+	var getReply interface{}
+
+	trace := request.Tracer.CreateTrace()
+	trace.RecordAction(Get{
+		ClientId: d.Data.ClientId,
+		OpId:     opId,
+		Key:      request.Key,
+	})
+
+	getArgs := chainedkv.GetArgs{
+		ClientId:   d.Data.ClientId,
+		OpId:       opId,
+		Key:        request.Key,
+		ClientAddr: d.Data.ClientIPPort,
+		Token:      trace.GenerateToken(),
+	}
+
+	for {
+		d.Cond.L.Unlock()
+
+		if d.Clients.TailClient != nil {
+			// Invoke Get
+			err = d.Clients.TailClient.Call(
+				"Server.Get",
+				getArgs,
+				&getReply,
+			)
+		}
+
+		d.Cond.L.Lock()
+
+		if err != nil {
+			d.getTail()
+
+			// Check if the request successfully completed even
+			// though the tail server failed to reply. If so, we
+			// simply return since the command has completed
+			if _, ok := d.Data.PendingRequests[opId]; !ok {
+				return
+			}
+		} else {
+			break
+		}
+	}
+}
+
+func (d *KVS) handlePut(opId uint32, request Request) {
+	var err error
+	var putReply interface{}
+
+	trace := request.Tracer.CreateTrace()
+	trace.RecordAction(Put{
+		ClientId: d.Data.ClientId,
+		OpId:     opId,
+		Key:      request.Key,
+		Value:    *request.Value,
+	})
+
+	putArgs := chainedkv.PutArgs{
+		ClientId:   d.Data.ClientId,
+		OpId:       opId,
+		Key:        request.Key,
+		Value:      *request.Value,
+		ClientAddr: d.Data.ClientIPPort,
+		Token:      trace.GenerateToken(),
+	}
+
+	for {
+		d.Cond.L.Unlock()
+
+		if d.Clients.HeadClient != nil {
+			// Invoke Put
+			err = d.Clients.HeadClient.Call(
+				"Server.Put",
+				putArgs,
+				&putReply,
+			)
+		}
+
+		d.Cond.L.Lock()
+
+		if err != nil {
+			d.getHead()
+
+			// Check if the request successfully completed even
+			// though the head server failed to reply. If so, we
+			// simply return since the command has completed
+			if _, ok := d.Data.PendingRequests[opId]; !ok {
+				return
+			}
+		} else {
+			break
+		}
+	}
+}
+
+func (d *KVS) handleOps(opReady chan<- bool) {
+	nextOpId := uint32(0)
+
+	d.getHead()
+	d.getTail()
+
+	d.Cond.L.Lock()
+	defer d.Cond.L.Unlock()
+
+	opReady <- true
+
+	for {
+		// Wait until expected next opId arrives
+	InnerLoop:
+		for {
+			select {
+			case <-d.Data.Done:
+				return
+			default:
+				if _, ok := d.Data.PendingRequests[nextOpId]; !ok {
+					d.Cond.Wait()
+				} else {
+					break InnerLoop
+				}
+			}
+		}
+
+		request := d.Data.PendingRequests[nextOpId]
+
+		if request.Value == nil {
+			d.handleGet(nextOpId, request)
+		} else {
+			d.handlePut(nextOpId, request)
+		}
+
+		// Wait until next opId finishes
+		for {
+			if _, ok := d.Data.PendingRequests[nextOpId]; ok {
+				d.Cond.Wait()
+			} else {
+				break
+			}
+		}
+
+		nextOpId++
+	}
+}
+
+func (d *KVS) startOp(tracer *tracing.Tracer, clientId string, key string, value *string) (uint32, error) {
+	d.Cond.L.Lock()
+	defer d.Cond.L.Unlock()
+
+	// Verify capacity hasn't been exceeded
+	if d.Data.ChCount >= d.Data.ChCapacity {
+		return 0, errors.New("concurrency capacity has been exceeded")
+	}
+
+	opId := d.Data.CurrOpId
+
+	// Update state
+	d.Data.CurrOpId++
+	d.Data.ChCount++
+
+	d.Data.PendingRequests[opId] = Request{
+		Key:    key,
+		Value:  value,
+		Tracer: tracer,
+	}
+
+	d.Cond.Broadcast()
+
+	return opId, nil
 }
 
 // Get non-blocking request from the client to make a get call for a given key.
@@ -247,48 +376,7 @@ func (d *KVS) Start(localTracer *tracing.Tracer, clientId string, coordIPPort st
 // to the client via the notify-channel channel returned in the Start call.
 // The value opId is used to identify this request and associate the returned value with this request.
 func (d *KVS) Get(tracer *tracing.Tracer, clientId string, key string) (uint32, error) {
-	var getReply interface{}
-
-	d.Mutex.Lock()
-	defer d.Mutex.Unlock()
-
-	// Verify capacity hasn't been exceeded
-	if d.Data.ChCount >= d.Data.ChCapacity {
-		return 0, errors.New("concurrency capacity has been exceeded")
-	}
-
-	trace := tracer.CreateTrace()
-	opId := d.Data.CurrOpId
-
-	trace.RecordAction(Get{ClientId: clientId, OpId: opId, Key: key})
-
-	getArgs := chainedkv.GetArgs{
-		ClientId:   clientId,
-		OpId:       opId,
-		Key:        key,
-		ClientAddr: d.Data.ClientIPPort,
-		Token:      trace.GenerateToken(),
-	}
-
-	// Invoke Get
-	d.Clients.TailClient.Go(
-		"Server.Get",
-		getArgs,
-		&getReply,
-		d.Data.DoneCh,
-	)
-
-	// Update state
-	d.Data.CurrOpId++
-	d.Data.ChCount++
-
-	d.Data.PendingGetRequests[opId] = Request{
-		Key:    key,
-		Tracer: tracer,
-		Trace:  trace,
-	}
-
-	return opId, nil
+	return d.startOp(tracer, clientId, key, nil)
 }
 
 // Put non-blocking request from the client to update the value associated with a key.
@@ -298,61 +386,18 @@ func (d *KVS) Get(tracer *tracing.Tracer, clientId string, key string) (uint32, 
 // and associate the returned value with this request. The returned value must be
 // delivered asynchronously via the notify-channel channel returned in the Start call.
 func (d *KVS) Put(tracer *tracing.Tracer, clientId string, key string, value string) (uint32, error) {
-	var putReply interface{}
-
-	d.Mutex.Lock()
-	defer d.Mutex.Unlock()
-
-	// Verify capacity hasn't been exceeded
-	if d.Data.ChCount >= d.Data.ChCapacity {
-		return 0, errors.New("concurrency capacity has been exceeded")
-	}
-
-	trace := tracer.CreateTrace()
-	opId := d.Data.CurrOpId
-
-	trace.RecordAction(Put{ClientId: clientId, OpId: opId, Key: key, Value: value})
-
-	putArgs := chainedkv.PutArgs{
-		ClientId:   clientId,
-		OpId:       opId,
-		Key:        key,
-		Value:      value,
-		ClientAddr: d.Data.ClientIPPort,
-		Token:      trace.GenerateToken(),
-	}
-
-	// Invoke Put
-	d.Clients.HeadClient.Go(
-		"Server.Put",
-		putArgs,
-		&putReply,
-		d.Data.DoneCh,
-	)
-
-	// Update state
-	d.Data.CurrOpId++
-	d.Data.ChCount++
-
-	d.Data.PendingPutRequests[opId] = Request{
-		Key:    key,
-		Value:  value,
-		Tracer: tracer,
-		Trace:  trace,
-	}
-
-	return opId, nil
+	return d.startOp(tracer, clientId, key, &value)
 }
 
 func (d *KVS) ReceiveGetResult(args chainedkv.ReplyArgs, reply *interface{}) error {
-	d.Mutex.Lock()
-	defer d.Mutex.Unlock()
+	d.Cond.L.Lock()
+	defer d.Cond.L.Unlock()
 
-	if _, ok := d.Data.PendingGetRequests[args.OpId]; !ok {
+	if _, ok := d.Data.PendingRequests[args.OpId]; !ok {
 		return nil
 	}
 
-	trace := d.Data.PendingGetRequests[args.OpId].Tracer.ReceiveToken(args.Token)
+	trace := d.Data.PendingRequests[args.OpId].Tracer.ReceiveToken(args.Token)
 	trace.RecordAction(GetResultRecvd{OpId: args.OpId, GId: args.GId, Key: args.Key, Value: args.Value})
 
 	// Notify client
@@ -360,20 +405,22 @@ func (d *KVS) ReceiveGetResult(args chainedkv.ReplyArgs, reply *interface{}) err
 
 	// Update state
 	d.Data.ChCount--
-	delete(d.Data.PendingGetRequests, args.OpId)
+	delete(d.Data.PendingRequests, args.OpId)
+
+	d.Cond.Broadcast()
 
 	return nil
 }
 
 func (d *KVS) ReceivePutResult(args chainedkv.ReplyArgs, reply *interface{}) error {
-	d.Mutex.Lock()
-	defer d.Mutex.Unlock()
+	d.Cond.L.Lock()
+	defer d.Cond.L.Unlock()
 
-	if _, ok := d.Data.PendingPutRequests[args.OpId]; !ok {
+	if _, ok := d.Data.PendingRequests[args.OpId]; !ok {
 		return nil
 	}
 
-	trace := d.Data.PendingPutRequests[args.OpId].Tracer.ReceiveToken(args.Token)
+	trace := d.Data.PendingRequests[args.OpId].Tracer.ReceiveToken(args.Token)
 	trace.RecordAction(PutResultRecvd{OpId: args.OpId, GId: args.GId, Key: args.Key})
 
 	// Notify client
@@ -381,142 +428,26 @@ func (d *KVS) ReceivePutResult(args chainedkv.ReplyArgs, reply *interface{}) err
 
 	// Update state
 	d.Data.ChCount--
-	delete(d.Data.PendingPutRequests, args.OpId)
+	delete(d.Data.PendingRequests, args.OpId)
+
+	d.Cond.Broadcast()
 
 	return nil
 }
 
-func (d *KVS) launchDoneChannel() {
-	var call *rpc.Call
+func (d *KVS) getHead() {
+	var servResp chainedkv.NodeResponse
 
-Loop:
-	for {
-		select {
-		case <-d.Data.TerminateDoneCh:
-			break Loop
-		case call = <-d.Data.DoneCh:
-			// Ignore successful requests
-			if call.Error == nil {
-				continue Loop
-			}
-
-			if call.ServiceMethod == "Server.Get" {
-				d.resendGetRequest(call)
-			} else {
-				d.resendPutRequest(call)
-			}
-		}
-	}
-}
-
-func (d *KVS) resendGetRequest(call *rpc.Call) {
-	var tailServResp chainedkv.NodeResponse
-	var getReply interface{}
-
-	d.Mutex.Lock()
-	defer d.Mutex.Unlock()
-
-	d.getTail(&tailServResp)
-
-	if tailServResp.ServerId == d.Data.TailServerInfo.ServerId {
-		// Tail hasn't changed, resend data through existing RPC client
-		d.Clients.TailClient.Go(
-			"Server.Get",
-			call.Args,
-			&getReply,
-			d.Data.DoneCh,
-		)
-	} else {
-		// Update tail server info and reinitialize client
-		d.Data.TailServerInfo.ServerId = tailServResp.ServerId
-		d.Data.TailServerInfo.RemotePortIp = tailServResp.ServerIpPort
-
-		d.Clients.TailClient.Close()
-
-		d.Clients.TailClient, _ = util.GetRPCClient(
-			d.Data.TailServerInfo.LocalPortIp,
-			tailServResp.ServerIpPort,
-		)
-
-		for opId, getRequests := range d.Data.PendingGetRequests {
-			d.Clients.TailClient.Go(
-				"Server.Get",
-				chainedkv.GetArgs{
-					ClientId:   d.Data.ClientId,
-					OpId:       opId,
-					Key:        getRequests.Key,
-					ClientAddr: d.Data.ClientIPPort,
-					Token:      getRequests.Trace.GenerateToken(),
-				},
-				&getReply,
-				d.Data.DoneCh,
-			)
-		}
-	}
-}
-
-func (d *KVS) resendPutRequest(call *rpc.Call) {
-	var headServResp chainedkv.NodeResponse
-	var putReply interface{}
-
-	d.Mutex.Lock()
-	defer d.Mutex.Unlock()
-
-	d.getHead(&headServResp)
-
-	if headServResp.ServerId == d.Data.HeadServerInfo.ServerId {
-		// Head hasn't changed, resend data through existing RPC client
-		d.Clients.HeadClient.Go(
-			"Server.Put",
-			call.Args,
-			&putReply,
-			d.Data.DoneCh,
-		)
-	} else {
-		// Update head server info and reinitialize client
-		d.Data.HeadServerInfo.ServerId = headServResp.ServerId
-		d.Data.HeadServerInfo.RemotePortIp = headServResp.ServerIpPort
-
-		d.Clients.HeadClient.Close()
-
-		d.Clients.HeadClient, _ = util.GetRPCClient(
-			d.Data.HeadServerInfo.LocalPortIp,
-			headServResp.ServerIpPort,
-		)
-
-		for opId, putRequests := range d.Data.PendingPutRequests {
-			d.Clients.HeadClient.Go(
-				"Server.Put",
-				chainedkv.PutArgs{
-					ClientId:   d.Data.ClientId,
-					OpId:       opId,
-					Key:        putRequests.Key,
-					Value:      putRequests.Value,
-					ClientAddr: d.Data.ClientIPPort,
-					Token:      putRequests.Trace.GenerateToken(),
-				},
-				&putReply,
-				d.Data.DoneCh,
-			)
-		}
-	}
-}
-
-func (d *KVS) getHead(servResp *chainedkv.NodeResponse) error {
 	d.Data.Trace.RecordAction(HeadReq{ClientId: d.Data.ClientId})
 
-	err := d.Clients.CoordClient.Call(
+	d.Clients.CoordClient.Call(
 		"Coord.GetHead",
 		chainedkv.NodeRequest{
 			ClientId: d.Data.ClientId,
 			Token:    d.Data.Trace.GenerateToken(),
 		},
-		servResp,
+		&servResp,
 	)
-
-	if err != nil {
-		return err
-	}
 
 	d.Data.Trace = d.Data.Tracer.ReceiveToken(servResp.Token)
 	d.Data.Trace.RecordAction(
@@ -526,24 +457,32 @@ func (d *KVS) getHead(servResp *chainedkv.NodeResponse) error {
 		},
 	)
 
-	return nil
+	d.Data.HeadServerInfo.ServerId = servResp.ServerId
+	d.Data.HeadServerInfo.RemotePortIp = servResp.ServerIpPort
+
+	if d.Clients.HeadClient != nil {
+		d.Clients.HeadClient.Close()
+	}
+
+	d.Clients.HeadClient, _ = util.GetRPCClient(
+		d.Data.HeadServerInfo.LocalPortIp,
+		servResp.ServerIpPort,
+	)
 }
 
-func (d *KVS) getTail(servResp *chainedkv.NodeResponse) error {
+func (d *KVS) getTail() {
+	var servResp chainedkv.NodeResponse
+
 	d.Data.Trace.RecordAction(TailReq{ClientId: d.Data.ClientId})
 
-	err := d.Clients.CoordClient.Call(
+	d.Clients.CoordClient.Call(
 		"Coord.GetTail",
 		chainedkv.NodeRequest{
 			ClientId: d.Data.ClientId,
 			Token:    d.Data.Trace.GenerateToken(),
 		},
-		servResp,
+		&servResp,
 	)
-
-	if err != nil {
-		return err
-	}
 
 	d.Data.Trace = d.Data.Tracer.ReceiveToken(servResp.Token)
 	d.Data.Trace.RecordAction(
@@ -553,23 +492,45 @@ func (d *KVS) getTail(servResp *chainedkv.NodeResponse) error {
 		},
 	)
 
-	return nil
+	d.Data.TailServerInfo.ServerId = servResp.ServerId
+	d.Data.TailServerInfo.RemotePortIp = servResp.ServerIpPort
+
+	if d.Clients.TailClient != nil {
+		d.Clients.TailClient.Close()
+	}
+
+	d.Clients.TailClient, _ = util.GetRPCClient(
+		d.Data.TailServerInfo.LocalPortIp,
+		servResp.ServerIpPort,
+	)
 }
 
 // Stop Stops the KVS instance from communicating with the KVS and
 // from delivering any results via the notify-channel. This call always succeeds.
 func (d *KVS) Stop() {
-
-	d.Mutex.Lock()
-	defer d.Mutex.Unlock()
+	d.Cond.L.Lock()
+	defer d.Cond.L.Unlock()
 
 	d.Data.Trace.RecordAction(KvslibStop{ClientId: d.Data.ClientId})
 
-	d.Clients.HeadClient.Close()
-	d.Clients.TailClient.Close()
-	d.Clients.CoordClient.Close()
-	d.Data.Listener.Close()
-	d.Data.TerminateDoneCh <- true
+	if d.Clients.HeadClient != nil {
+		d.Clients.HeadClient.Close()
+	}
+
+	if d.Clients.TailClient != nil {
+		d.Clients.TailClient.Close()
+	}
+
+	if d.Clients.CoordClient != nil {
+		d.Clients.CoordClient.Close()
+	}
+
+	if d.Data.Listener != nil {
+		d.Data.Listener.Close()
+	}
+
+	d.Data.Done <- true
+	d.Cond.Broadcast()
 
 	*d = *NewKVS()
 }

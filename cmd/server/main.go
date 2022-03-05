@@ -20,5 +20,5 @@ func main() {
 		Secret:         config.Secret,
 	})
 	server := chainedkv.NewServer()
-	server.Start(config.ServerId, config.CoordAddr, config.ServerAddr, config.ServerListenAddr, config.ClientListenAddr, stracer)
+	server.Start(config.ServerId, config.CoordAddr, config.ServerAddr, config.ServerServerAddr, config.ServerListenAddr, config.ClientListenAddr, stracer)
 }

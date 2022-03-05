@@ -3,6 +3,7 @@ package util
 import (
 	"net"
 	"net/rpc"
+	"strconv"
 )
 
 func GetFreeTCPPort(addrIp string) (int, error) {
@@ -65,4 +66,37 @@ func GetRPCClient(localAddr string, remoteAddr string) (*rpc.Client, error) {
 	}
 
 	return rpc.NewClient(conn), nil
+}
+
+func Max(x, y uint64) uint64 {
+	if x < y {
+		return y
+	}
+
+	return x
+}
+
+func SplitAndGetRPCClient(localAddr string, remoteAddr string) (*rpc.Client, error) {
+	localIp, _, err := net.SplitHostPort(localAddr)
+
+	if err != nil {
+		return nil, err
+	}
+
+	port, err := GetFreeTCPPort(localIp)
+
+	if err != nil {
+		return nil, err
+	}
+
+	client, err := GetRPCClient(
+		net.JoinHostPort(localIp, strconv.Itoa(port)),
+		remoteAddr,
+	)
+
+	if err != nil {
+		return nil, err
+	}
+
+	return client, nil
 }
