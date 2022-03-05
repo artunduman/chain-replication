@@ -1,7 +1,6 @@
 package chainedkv
 
 import (
-	fchecker "cs.ubc.ca/cpsc416/a3/fcheck"
 	"errors"
 	"log"
 	"math/rand"
@@ -11,6 +10,8 @@ import (
 	"os/signal"
 	"sync"
 	"syscall"
+
+	fchecker "cs.ubc.ca/cpsc416/a3/fcheck"
 
 	"github.com/DistributedClocks/tracing"
 )
@@ -284,10 +285,12 @@ func (c *Coord) handleFailure(serverId uint8) {
 
 	c.Cond.L.Lock()
 	defer c.Cond.L.Unlock()
+
 	// One server can't fail, exit
 	if len(c.CurrChain) == 1 {
-		log.Fatalf("Server %d failed, when there is only one server in the chain", serverId)
+		log.Fatalf("Last remaining server %d failed", serverId)
 	}
+
 	c.Trace.RecordAction(ServerFail{serverId})
 
 	prevServerId, nextServerId, newChain := c.getPrevNextActiveServers(serverId)
@@ -345,8 +348,6 @@ func (c *Coord) getPrevNextActiveServers(serverId uint8) (uint8, uint8, []uint8)
 			newChain := make([]uint8, len(c.CurrChain))
 			copy(newChain, c.CurrChain)
 			newChain = append(newChain[:i], newChain[i+1:]...)
-
-			log.Println("newChain:", newChain)
 
 			if i == 0 {
 				return 0, c.CurrChain[i+1], newChain
