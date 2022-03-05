@@ -200,6 +200,7 @@ func (d *KVS) Start(localTracer *tracing.Tracer, clientId string, coordIPPort st
 }
 
 func (d *KVS) handleGet(opId uint32, request Request) {
+	var err error
 	var getReply interface{}
 
 	trace := request.Tracer.CreateTrace()
@@ -220,12 +221,14 @@ func (d *KVS) handleGet(opId uint32, request Request) {
 	for {
 		d.Cond.L.Unlock()
 
-		// Invoke Get
-		err := d.Clients.TailClient.Call(
-			"Server.Get",
-			getArgs,
-			&getReply,
-		)
+		if d.Clients.TailClient != nil {
+			// Invoke Get
+			err = d.Clients.TailClient.Call(
+				"Server.Get",
+				getArgs,
+				&getReply,
+			)
+		}
 
 		d.Cond.L.Lock()
 
@@ -245,6 +248,7 @@ func (d *KVS) handleGet(opId uint32, request Request) {
 }
 
 func (d *KVS) handlePut(opId uint32, request Request) {
+	var err error
 	var putReply interface{}
 
 	trace := request.Tracer.CreateTrace()
@@ -267,12 +271,14 @@ func (d *KVS) handlePut(opId uint32, request Request) {
 	for {
 		d.Cond.L.Unlock()
 
-		// Invoke Put
-		err := d.Clients.HeadClient.Call(
-			"Server.Put",
-			putArgs,
-			&putReply,
-		)
+		if d.Clients.HeadClient != nil {
+			// Invoke Put
+			err = d.Clients.HeadClient.Call(
+				"Server.Put",
+				putArgs,
+				&putReply,
+			)
+		}
 
 		d.Cond.L.Lock()
 
