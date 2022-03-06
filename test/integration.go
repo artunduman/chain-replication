@@ -184,7 +184,7 @@ func test4(processes map[string]*os.Process) {
 	client, notifyCh, tracer, clientId := startClient(5)
 	defer client.Stop()
 
-	for i := 0; i < 1025; i++ {
+	for i := 0; i < 2; i++ {
 		_, err := client.Get(tracer, clientId, "key1")
 		if err != nil {
 			log.Fatal("Error getting key: ", err)
@@ -196,7 +196,7 @@ func test4(processes map[string]*os.Process) {
 		log.Fatal("Error putting key: ", err)
 	}
 
-	for i := 0; i < 1026; i++ {
+	for i := 0; i < 3; i++ {
 		result := <-notifyCh
 		log.Println(result)
 	}
