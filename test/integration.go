@@ -128,6 +128,24 @@ func test1() {
 	}
 }
 
+func test2() {
+	// Don't wait for servers to be up, let coord handle it
+	client, notifyCh, tracer, clientId := startClient(1)
+	defer client.Stop()
+
+	for i := 0; i < 10; i++ {
+		_, err := client.Put(tracer, clientId, strconv.Itoa(i), strconv.Itoa(i))
+		if err != nil {
+			log.Fatal("Error putting key: ", err)
+		}
+	}
+
+	for i := 0; i < 10; i++ {
+		result := <-notifyCh
+		log.Println(result)
+	}
+}
+
 func teardown(processes map[string]*os.Process, testIndex int) {
 	for _, process := range processes {
 		process.Kill()
@@ -145,6 +163,7 @@ func main() {
 	defer clean()
 	tests := []func(){
 		test1,
+		test2,
 	}
 	for testIndex, test := range tests {
 		runTest(test, testIndex)
