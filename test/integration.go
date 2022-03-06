@@ -111,7 +111,7 @@ func startClient(clientId int) (*kvslib.KVS, kvslib.NotifyChannel, *tracing.Trac
 	return client, notifyCh, tracer, "client" + strconv.Itoa(clientId)
 }
 
-func test1() {
+func test1(processes map[string]*os.Process) {
 	//Wait for servers to be up (easy case)
 	time.Sleep(time.Millisecond * 1000)
 
@@ -131,7 +131,7 @@ func test1() {
 	}
 }
 
-func test2() {
+func test2(processes map[string]*os.Process) {
 	// Don't wait for servers to be up, let coord handle it
 	client, notifyCh, tracer, clientId := startClient(1)
 	defer client.Stop()
@@ -149,8 +149,9 @@ func test2() {
 	}
 }
 
-func test3() {
+func test3(processes map[string]*os.Process) {
 	// Test if server can continue after client crashes
+
 }
 
 func teardown(processes map[string]*os.Process, testIndex int) {
@@ -168,7 +169,7 @@ func teardown(processes map[string]*os.Process, testIndex int) {
 func main() {
 	build()
 	defer clean()
-	tests := []func(){
+	tests := []func(map[string]*os.Process){
 		test1,
 		test2,
 		test3,
@@ -179,8 +180,8 @@ func main() {
 	}
 }
 
-func runTest(test func(), testIndex int) {
+func runTest(test func(map[string]*os.Process), testIndex int) {
 	processes := setup(10)
 	defer teardown(processes, testIndex)
-	test()
+	test(processes)
 }
