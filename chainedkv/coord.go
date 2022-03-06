@@ -296,6 +296,7 @@ func (c *Coord) handleFailure(serverId uint8) {
 	prevServerId, nextServerId, newChain := c.getPrevNextActiveServers(serverId)
 
 	c.CurrChain = newChain
+	c.NumServers = uint8(len(c.CurrChain))
 
 	if prevServerId == 0 {
 		prevAddr = nil
