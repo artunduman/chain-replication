@@ -14,11 +14,11 @@ import (
 )
 
 func build() {
-	executeSync("make", "all")
+	executeSync("make", "-C", "./test/", "all")
 }
 
 func clean() {
-	executeSync("make", "clean")
+	executeSync("make", "-C", "./test/", "clean")
 }
 
 func setup(numServers int) map[string]*os.Process {
