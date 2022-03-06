@@ -218,10 +218,10 @@ func main() {
 	build()
 	defer clean()
 	tests := []func(map[string]*os.Process){
-		//test0,
-		//test1,
-		//test2,
-		//test3,
+		test0,
+		test1,
+		test2,
+		test3,
 		test4,
 	}
 	for testIndex, test := range tests {
