@@ -114,7 +114,7 @@ type LocalData struct {
 	TailServerInfo  ServerInfo
 	CurrOpId        uint32
 	ChCount         int
-	Done            chan bool
+	Done            bool
 	Listener        net.Listener
 }
 
@@ -142,7 +142,7 @@ func (d *KVS) Start(localTracer *tracing.Tracer, clientId string, coordIPPort st
 	d.Data.ChCapacity = chCapacity
 	d.Data.CurrOpId = 0
 	d.Data.ChCount = 0
-	d.Data.Done = make(chan bool, 1)
+	d.Data.Done = false
 	d.Data.PendingRequests = make(map[uint32]Request)
 	d.Data.HeadServerInfo.LocalPortIp = localHeadServerIPPort
 	d.Data.TailServerInfo.LocalPortIp = localTailServerIPPort
@@ -230,7 +230,7 @@ func (d *KVS) handleGet(opId uint32, request Request) {
 
 		d.Cond.L.Lock()
 
-		if err != nil {
+		if err != nil && !d.Data.Done {
 			d.getTail()
 
 			// Check if the request successfully completed even
@@ -280,7 +280,7 @@ func (d *KVS) handlePut(opId uint32, request Request) {
 
 		d.Cond.L.Lock()
 
-		if err != nil {
+		if err != nil && !d.Data.Done {
 			d.getHead()
 
 			// Check if the request successfully completed even
@@ -310,15 +310,14 @@ func (d *KVS) handleOps(opReady chan<- bool) {
 		// Wait until expected next opId arrives
 	InnerLoop:
 		for {
-			select {
-			case <-d.Data.Done:
+			if d.Data.Done {
 				return
-			default:
-				if _, ok := d.Data.PendingRequests[nextOpId]; !ok {
-					d.Cond.Wait()
-				} else {
-					break InnerLoop
-				}
+			}
+
+			if _, ok := d.Data.PendingRequests[nextOpId]; !ok {
+				d.Cond.Wait()
+			} else {
+				break InnerLoop
 			}
 		}
 
@@ -393,7 +392,8 @@ func (d *KVS) ReceiveGetResult(args chainedkv.ReplyArgs, reply *interface{}) err
 	d.Cond.L.Lock()
 	defer d.Cond.L.Unlock()
 
-	if _, ok := d.Data.PendingRequests[args.OpId]; !ok {
+	if _, ok := d.Data.PendingRequests[args.OpId]; !ok || d.Data.Done {
+		d.Cond.Broadcast()
 		return nil
 	}
 
@@ -416,7 +416,8 @@ func (d *KVS) ReceivePutResult(args chainedkv.ReplyArgs, reply *interface{}) err
 	d.Cond.L.Lock()
 	defer d.Cond.L.Unlock()
 
-	if _, ok := d.Data.PendingRequests[args.OpId]; !ok {
+	if _, ok := d.Data.PendingRequests[args.OpId]; !ok || d.Data.Done {
+		d.Cond.Broadcast()
 		return nil
 	}
 
@@ -513,6 +514,9 @@ func (d *KVS) Stop() {
 
 	d.Data.Trace.RecordAction(KvslibStop{ClientId: d.Data.ClientId})
 
+	// Remove any pending requests
+	d.Data.PendingRequests = make(map[uint32]Request)
+
 	if d.Clients.HeadClient != nil {
 		d.Clients.HeadClient.Close()
 	}
@@ -529,8 +533,6 @@ func (d *KVS) Stop() {
 		d.Data.Listener.Close()
 	}
 
-	d.Data.Done <- true
+	d.Data.Done = true
 	d.Cond.Broadcast()
-
-	*d = *NewKVS()
 }
