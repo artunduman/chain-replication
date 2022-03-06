@@ -86,12 +86,6 @@ func startClient(clientId int) (*kvslib.KVS, kvslib.NotifyChannel, *tracing.Trac
 
 	client := kvslib.NewKVS()
 	clientHost, _, _ := net.SplitHostPort(config.LocalCoordIPPort)
-	//_, localHeadBaseStr, _ := net.SplitHostPort(config.LocalHeadServerIPPort)
-	//_, localTailBaseStr, _ := net.SplitHostPort(config.LocalTailServerIPPort)
-	//
-	//localCoordBase, _ := strconv.Atoi(localCoordBaseStr)
-	//localHeadBase, _ := strconv.Atoi(localHeadBaseStr)
-	//localTailBase, _ := strconv.Atoi(localTailBaseStr)
 
 	ports := make([]int, 3)
 	for i := 0; i < 3; i++ {
@@ -176,8 +170,11 @@ func main() {
 	defer clean()
 	tests := []func(){
 		test1,
+		test2,
+		test3,
 	}
 	for testIndex, test := range tests {
+		log.Println("Starting test: ", testIndex)
 		runTest(test, testIndex)
 	}
 }
