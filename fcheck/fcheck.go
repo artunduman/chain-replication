@@ -16,6 +16,7 @@ import (
 	"encoding/gob"
 	"errors"
 	"net"
+	"sync"
 	"time"
 )
 
@@ -69,7 +70,7 @@ type readStruct struct {
 var isActive bool = false
 
 var stopAck chan bool = make(chan bool)
-var stopHBeatMap map[uint8]chan bool = make(map[uint8]chan bool)
+var stopHBeatMap sync.Map
 var notifyCh chan FailureDetected
 
 // Starts the fcheck library.
@@ -125,9 +126,10 @@ func Stop() {
 func writeStopChannels() {
 	stopAck <- true
 
-	for _, stopHBeat := range stopHBeatMap {
-		stopHBeat <- true
-	}
+	stopHBeatMap.Range(func(key, value interface{}) bool {
+		value.(chan bool) <- true
+		return true
+	})
 }
 
 func ackInit(arg StartStruct) error {
@@ -165,7 +167,7 @@ func hbeatInit(arg StartStruct) error {
 			return errors.New("failed to dial")
 		}
 
-		stopHBeatMap[server.ServerId] = make(chan bool)
+		stopHBeatMap.Store(server.ServerId, make(chan bool))
 		go hbeat(arg, server, conn)
 	}
 
@@ -184,6 +186,9 @@ func hbeat(arg StartStruct, server Server, conn *net.UDPConn) {
 	rtt := time.Duration(3) * time.Second
 	numLost := uint8(0)
 
+	hBeatInterace, _ := stopHBeatMap.Load(server.ServerId)
+	stopHBeat := hBeatInterace.(chan bool)
+
 	for {
 		hbeatMessage := HBeatMessage{
 			EpochNonce: arg.EpochNonce,
@@ -197,8 +202,8 @@ func hbeat(arg StartStruct, server Server, conn *net.UDPConn) {
 	InnerLoop:
 		for {
 			select {
-			case <-stopHBeatMap[server.ServerId]:
-				delete(stopHBeatMap, server.ServerId)
+			case <-stopHBeat:
+				stopHBeatMap.Delete(server.ServerId)
 				return
 			case <-handleRead(&rs, deadline, conn):
 				if rs.err != nil {
@@ -237,8 +242,8 @@ func hbeat(arg StartStruct, server Server, conn *net.UDPConn) {
 				Timestamp: time.Now(),
 			}
 
-			<-stopHBeatMap[server.ServerId]
-			delete(stopHBeatMap, server.ServerId)
+			<-stopHBeat
+			stopHBeatMap.Delete(server.ServerId)
 			return
 		}
 	}
