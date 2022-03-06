@@ -150,6 +150,7 @@ func (d *KVS) Start(localTracer *tracing.Tracer, clientId string, coordIPPort st
 	d.Data.Trace.RecordAction(KvslibStart{ClientId: clientId})
 
 	// Setup local rpc
+	rpc.DefaultServer = rpc.NewServer()
 	err := rpc.Register(d)
 
 	if err != nil {
