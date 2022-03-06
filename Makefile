@@ -3,16 +3,16 @@
 all: server coord client tracing
 
 server:
-	go build -o bin/server ./cmd/server
+	go build -o test/bin/server ./test/cmd/server
 
 coord:
-	go build -o bin/coord ./cmd/coord
+	go build -o test/bin/coord ./test/cmd/coord
 
 client:
-	go build -o bin/client ./cmd/client
+	go build -o test/bin/client ./test/cmd/client
 
 tracing:
-	go build -o bin/tracing ./cmd/tracing-server
+	go build -o test/bin/tracing ./test/cmd/tracing-server
 
 clean:
-	rm -f bin/*
+	rm -f test/bin/*
