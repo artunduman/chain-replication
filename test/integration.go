@@ -111,7 +111,7 @@ func startClient(clientId int) (*kvslib.KVS, kvslib.NotifyChannel, *tracing.Trac
 	return client, notifyCh, tracer, "client" + strconv.Itoa(clientId)
 }
 
-func test1(processes map[string]*os.Process) {
+func test0(processes map[string]*os.Process) {
 	//Wait for servers to be up (easy case)
 	time.Sleep(time.Millisecond * 1000)
 
@@ -131,7 +131,7 @@ func test1(processes map[string]*os.Process) {
 	}
 }
 
-func test2(processes map[string]*os.Process) {
+func test1(processes map[string]*os.Process) {
 	// Don't wait for servers to be up, let coord handle it
 	client, notifyCh, tracer, clientId := startClient(2)
 	defer client.Stop()
@@ -149,7 +149,7 @@ func test2(processes map[string]*os.Process) {
 	}
 }
 
-func test3(processes map[string]*os.Process) {
+func test2(processes map[string]*os.Process) {
 	// Kill head server before puts are acked
 	client, notifyCh, tracer, clientId := startClient(3)
 	defer client.Stop()
@@ -168,7 +168,7 @@ func test3(processes map[string]*os.Process) {
 	}
 }
 
-func test4(processes map[string]*os.Process) {
+func test3(processes map[string]*os.Process) {
 	// Kill two neighboring servers simultaneously
 	// Wait for RTT to get calculated
 	time.Sleep(time.Second * 2)
@@ -195,10 +195,10 @@ func main() {
 	build()
 	defer clean()
 	tests := []func(map[string]*os.Process){
+		test0,
 		test1,
 		test2,
 		test3,
-		test4,
 	}
 	for testIndex, test := range tests {
 		log.Println("Starting test:", testIndex)
