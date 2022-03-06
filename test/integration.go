@@ -147,8 +147,12 @@ func main() {
 		test1,
 	}
 	for testIndex, test := range tests {
-		processes := setup(10)
-		test()
-		teardown(processes, testIndex)
+		runTest(test, testIndex)
 	}
+}
+
+func runTest(test func(), testIndex int) {
+	processes := setup(10)
+	defer teardown(processes, testIndex)
+	test()
 }
