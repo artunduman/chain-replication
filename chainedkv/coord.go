@@ -370,7 +370,7 @@ func (c *Coord) GetHead(args NodeRequest, reply *NodeResponse) error {
 	trace.RecordAction(HeadReqRecvd{args.ClientId})
 
 	// Wait until all servers have been added
-	for uint8(len(c.DiscoveredServers)) != c.NumServers {
+	for uint8(len(c.CurrChain)) != c.NumServers {
 		c.Cond.Wait()
 	}
 
@@ -391,7 +391,7 @@ func (c *Coord) GetTail(args NodeRequest, reply *NodeResponse) error {
 	trace.RecordAction(TailReqRecvd{args.ClientId})
 
 	// Wait until all servers have been added
-	for uint8(len(c.DiscoveredServers)) != c.NumServers {
+	for uint8(len(c.CurrChain)) != c.NumServers {
 		c.Cond.Wait()
 	}
 
