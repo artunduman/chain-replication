@@ -2,6 +2,7 @@ package main
 
 import (
 	"log"
+	"net"
 	"strconv"
 	"time"
 
@@ -24,7 +25,26 @@ func main() {
 
 	for c := 0; c < 2; c++ {
 		client := kvslib.NewKVS()
-		notifCh, err := client.Start(tracer, config.ClientID, config.CoordIPPort, config.LocalCoordIPPort, config.LocalHeadServerIPPort, config.LocalTailServerIPPort, config.ChCapacity)
+		clientHost, _, _ := net.SplitHostPort(config.LocalCoordIPPort)
+
+		ports := make([]int, 3)
+		for i := 0; i < 3; i++ {
+			port, err := util.GetFreeTCPPort(clientHost)
+			if err != nil {
+				log.Fatal("Error getting free port: ", err)
+			}
+			ports[i] = port
+		}
+
+		notifCh, err := client.Start(
+			tracer,
+			"client"+strconv.Itoa(c),
+			config.CoordIPPort,
+			net.JoinHostPort(clientHost, strconv.Itoa(ports[0])),
+			net.JoinHostPort(clientHost, strconv.Itoa(ports[1])),
+			net.JoinHostPort(clientHost, strconv.Itoa(ports[2])),
+			config.ChCapacity,
+		)
 		if err != nil {
 			log.Fatalf("Error starting client: %v\n", err)
 		}
