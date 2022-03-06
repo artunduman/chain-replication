@@ -115,7 +115,6 @@ type LocalData struct {
 	CurrOpId        uint32
 	ChCount         int
 	Done            chan bool
-	DoneSuccess     chan bool
 	Listener        net.Listener
 }
 
@@ -144,7 +143,6 @@ func (d *KVS) Start(localTracer *tracing.Tracer, clientId string, coordIPPort st
 	d.Data.CurrOpId = 0
 	d.Data.ChCount = 0
 	d.Data.Done = make(chan bool, 1)
-	d.Data.DoneSuccess = make(chan bool, 1)
 	d.Data.PendingRequests = make(map[uint32]Request)
 	d.Data.HeadServerInfo.LocalPortIp = localHeadServerIPPort
 	d.Data.TailServerInfo.LocalPortIp = localTailServerIPPort
@@ -314,7 +312,6 @@ func (d *KVS) handleOps(opReady chan<- bool) {
 		for {
 			select {
 			case <-d.Data.Done:
-				d.Data.DoneSuccess <- true
 				return
 			default:
 				if _, ok := d.Data.PendingRequests[nextOpId]; !ok {
@@ -534,7 +531,6 @@ func (d *KVS) Stop() {
 
 	d.Data.Done <- true
 	d.Cond.Broadcast()
-	<-d.Data.DoneSuccess
 
 	*d = *NewKVS()
 }
