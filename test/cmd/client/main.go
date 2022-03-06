@@ -1,3 +1,5 @@
+// Not used by integration.go
+
 package main
 
 import (
