@@ -2,6 +2,8 @@ package main
 
 import (
 	"log"
+	"strconv"
+	"time"
 
 	"cs.ubc.ca/cpsc416/a3/chainedkv"
 	"cs.ubc.ca/cpsc416/a3/kvslib"
@@ -24,17 +26,18 @@ func main() {
 	notifCh, err := client.Start(tracer, config.ClientID, config.CoordIPPort, config.LocalCoordIPPort, config.LocalHeadServerIPPort, config.LocalTailServerIPPort, config.ChCapacity)
 	util.CheckErr(err, "Error reading client config: %v\n", err)
 
-	// Put a key-value pair
-	op, err := client.Put(tracer, "clientID1", "key2", "value2")
-	util.CheckErr(err, "Error putting value %v, opId: %v\b", err, op)
+	for i := 0; i < 10; i++ {
+		_, err := client.Put(tracer, "client1", strconv.Itoa(i), strconv.Itoa(i))
+		if err != nil {
+			log.Println("Error putting key-value pair: %v\n", err)
+		}
+	}
 
-	// Get a key's value
-	op, err = client.Get(tracer, "clientID1", "key1")
-	util.CheckErr(err, "Error getting value %v, opId: %v\b", err, op)
-
-	for i := 0; i < 2; i++ {
+	for i := 0; i < 10; i++ {
 		result := <-notifCh
 		log.Println(result)
 	}
+	client.Stop()
+	time.Sleep(time.Second)
 	client.Stop()
 }
