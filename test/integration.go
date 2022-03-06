@@ -180,7 +180,7 @@ func test3(processes map[string]*os.Process) {
 }
 
 func test4(processes map[string]*os.Process) {
-	// Kill head server before puts are acked
+	// Simple gets and puts
 	client, notifyCh, tracer, clientId := startClient(5)
 	defer client.Stop()
 
@@ -202,6 +202,45 @@ func test4(processes map[string]*os.Process) {
 	}
 }
 
+func test5(processes map[string]*os.Process) {
+	// Kill tail server during get
+	client, notifyCh, tracer, clientId := startClient(6)
+	defer client.Stop()
+
+	for i := 0; i < 2; i++ {
+		_, err := client.Get(tracer, clientId, "key1")
+		if err != nil {
+			log.Fatal("Error getting key: ", err)
+		}
+	}
+	processes["server10"].Kill()
+	for i := 0; i < 2; i++ {
+		result := <-notifyCh
+		log.Println(result)
+	}
+}
+
+func test6(processes map[string]*os.Process) {
+	// Send 1025 gets and one put, gid should increment
+	client, notifyCh, tracer, clientId := startClient(7)
+	defer client.Stop()
+
+	for i := 0; i < 1025; i++ {
+		_, err := client.Get(tracer, clientId, "key1")
+		if err != nil {
+			log.Fatal("Error getting key: ", err)
+		}
+	}
+	_, err := client.Put(tracer, clientId, "key1", "value1")
+	if err != nil {
+		log.Fatal("Error putting key: ", err)
+	}
+	for i := 0; i < 1026; i++ {
+		result := <-notifyCh
+		log.Println(result)
+	}
+}
+
 func teardown(processes map[string]*os.Process, testIndex int) {
 	for _, process := range processes {
 		process.Kill()
@@ -218,11 +257,13 @@ func main() {
 	build()
 	defer clean()
 	tests := []func(map[string]*os.Process){
-		test0,
-		test1,
-		test2,
-		test3,
-		test4,
+		//test0,
+		//test1,
+		//test2,
+		//test3,
+		//test4,
+		//test5,
+		test6,
 	}
 	for testIndex, test := range tests {
 		log.Println("Starting test:", testIndex)
