@@ -109,18 +109,23 @@ func startClient(clientId int) (*kvslib.KVS, kvslib.NotifyChannel, *tracing.Trac
 }
 
 func test1() {
-	// Wait for servers to be up (easy case)
-	//time.Sleep(time.Millisecond * 1000)
-	//client, notifyCh, tracer, clientId := startClient(1)
-	//defer client.Stop()
-	//for i := 0; i < 10; i++ {
-	//	client.Put(tracer, clientId, strconv.Itoa(i), strconv.Itoa(i))
-	//}
-	//for i := 0; i < 10; i++ {
-	//	result := <-notifyCh
-	//	log.Println(result)
-	//}
-	time.Sleep(time.Hour)
+	//Wait for servers to be up (easy case)
+	time.Sleep(time.Millisecond * 1000)
+
+	client, notifyCh, tracer, clientId := startClient(1)
+	defer client.Stop()
+
+	for i := 0; i < 10; i++ {
+		_, err := client.Put(tracer, clientId, strconv.Itoa(i), strconv.Itoa(i))
+		if err != nil {
+			log.Fatal("Error putting key: ", err)
+		}
+	}
+
+	for i := 0; i < 10; i++ {
+		result := <-notifyCh
+		log.Println(result)
+	}
 }
 
 func teardown(processes map[string]*os.Process, testIndex int) {
