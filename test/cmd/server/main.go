@@ -35,22 +35,22 @@ func main() {
 
 	server := chainedkv.NewServer()
 
-	serverHost, serverAddrBaseStr, _ := net.SplitHostPort(config.ServerAddr)
-	_, serverServerAddrBaseStr, _ := net.SplitHostPort(config.ServerServerAddr)
-	_, serverListenAddrBaseStr, _ := net.SplitHostPort(config.ServerListenAddr)
-	_, clientListenAddrBaseStr, _ := net.SplitHostPort(config.ClientListenAddr)
-	serverAddrBase, _ := strconv.Atoi(serverAddrBaseStr)
-	serverServerAddrBase, _ := strconv.Atoi(serverServerAddrBaseStr)
-	serverListenAddrBase, _ := strconv.Atoi(serverListenAddrBaseStr)
-	clientListenAddrBase, _ := strconv.Atoi(clientListenAddrBaseStr)
-
+	serverHost, _, _ := net.SplitHostPort(config.ServerAddr)
+	ports := make([]int, 4)
+	for i := 0; i < 4; i++ {
+		port, err := util.GetFreeTCPPort(serverHost)
+		if err != nil {
+			log.Fatalf("Error getting free port: %s", err)
+		}
+		ports[i] = port
+	}
 	err = server.Start(
 		serverId,
 		config.CoordAddr,
-		net.JoinHostPort(serverHost, strconv.Itoa(serverAddrBase+serverIdInt)),
-		net.JoinHostPort(serverHost, strconv.Itoa(serverServerAddrBase+serverIdInt)),
-		net.JoinHostPort(serverHost, strconv.Itoa(serverListenAddrBase+serverIdInt)),
-		net.JoinHostPort(serverHost, strconv.Itoa(clientListenAddrBase+serverIdInt)),
+		net.JoinHostPort(serverHost, strconv.Itoa(ports[0])),
+		net.JoinHostPort(serverHost, strconv.Itoa(ports[1])),
+		net.JoinHostPort(serverHost, strconv.Itoa(ports[2])),
+		net.JoinHostPort(serverHost, strconv.Itoa(ports[3])),
 		stracer,
 	)
 	if err != nil {

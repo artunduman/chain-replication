@@ -85,21 +85,30 @@ func startClient(clientId int) (*kvslib.KVS, kvslib.NotifyChannel, *tracing.Trac
 	})
 
 	client := kvslib.NewKVS()
-	clientHost, localCoordBaseStr, _ := net.SplitHostPort(config.LocalCoordIPPort)
-	_, localHeadBaseStr, _ := net.SplitHostPort(config.LocalHeadServerIPPort)
-	_, localTailBaseStr, _ := net.SplitHostPort(config.LocalTailServerIPPort)
+	clientHost, _, _ := net.SplitHostPort(config.LocalCoordIPPort)
+	//_, localHeadBaseStr, _ := net.SplitHostPort(config.LocalHeadServerIPPort)
+	//_, localTailBaseStr, _ := net.SplitHostPort(config.LocalTailServerIPPort)
+	//
+	//localCoordBase, _ := strconv.Atoi(localCoordBaseStr)
+	//localHeadBase, _ := strconv.Atoi(localHeadBaseStr)
+	//localTailBase, _ := strconv.Atoi(localTailBaseStr)
 
-	localCoordBase, _ := strconv.Atoi(localCoordBaseStr)
-	localHeadBase, _ := strconv.Atoi(localHeadBaseStr)
-	localTailBase, _ := strconv.Atoi(localTailBaseStr)
+	ports := make([]int, 3)
+	for i := 0; i < 3; i++ {
+		port, err := util.GetFreeTCPPort(clientHost)
+		if err != nil {
+			log.Fatal("Error getting free port: ", err)
+		}
+		ports[i] = port
+	}
 
 	notifyCh, err := client.Start(
 		tracer,
 		clientIdStr,
 		config.CoordIPPort,
-		net.JoinHostPort(clientHost, strconv.Itoa(localCoordBase+clientId)),
-		net.JoinHostPort(clientHost, strconv.Itoa(localHeadBase+clientId)),
-		net.JoinHostPort(clientHost, strconv.Itoa(localTailBase+clientId)),
+		net.JoinHostPort(clientHost, strconv.Itoa(ports[0])),
+		net.JoinHostPort(clientHost, strconv.Itoa(ports[1])),
+		net.JoinHostPort(clientHost, strconv.Itoa(ports[2])),
 		config.ChCapacity,
 	)
 	if err != nil {
@@ -146,6 +155,10 @@ func test2() {
 	}
 }
 
+func test3() {
+	// Test if server can continue after client crashes
+}
+
 func teardown(processes map[string]*os.Process, testIndex int) {
 	for _, process := range processes {
 		process.Kill()
@@ -163,7 +176,6 @@ func main() {
 	defer clean()
 	tests := []func(){
 		test1,
-		test2,
 	}
 	for testIndex, test := range tests {
 		runTest(test, testIndex)
