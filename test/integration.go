@@ -168,6 +168,17 @@ func test3(processes map[string]*os.Process) {
 	}
 }
 
+func test4(processes map[string]*os.Process) {
+	// Kill two neighboring servers simultaneously
+	// Wait for RTT to get calculated
+	time.Sleep(time.Second * 2)
+	processes["server2"].Kill()
+	processes["server3"].Kill()
+	// Wait for it to die
+	processes["server3"].Wait()
+	time.Sleep(time.Second * 3)
+}
+
 func teardown(processes map[string]*os.Process, testIndex int) {
 	for _, process := range processes {
 		process.Kill()
@@ -187,9 +198,10 @@ func main() {
 		test1,
 		test2,
 		test3,
+		test4,
 	}
 	for testIndex, test := range tests {
-		log.Println("Starting test: ", testIndex)
+		log.Println("Starting test:", testIndex)
 		runTest(test, testIndex)
 	}
 }
