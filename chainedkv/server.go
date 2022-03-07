@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"sync"
 	"syscall"
+	"time"
 
 	fchecker "cs.ubc.ca/cpsc416/a3/fcheck"
 	"cs.ubc.ca/cpsc416/a3/util"
@@ -505,6 +506,27 @@ func (s *Server) handlePut(trace *tracing.Trace, args PutArgs) error {
 
 		if err == nil {
 			return nil
+		}
+
+		if !s.isHead() {
+			return err
+		} else {
+			time.Sleep(time.Second)
+			trace.RecordAction(PutRecvd{args.ClientId, args.OpId, args.Key, args.Value})
+
+			args.GId = s.nextPutGId
+			s.nextGetGId = args.GId + 1
+			s.nextPutGId = args.GId + PutGIdIncrement
+
+			trace.RecordAction(PutOrdered{
+				args.ClientId,
+				args.OpId,
+				args.GId,
+				args.Key,
+				args.Value,
+			})
+
+			trace.RecordAction(PutFwdRecvd{args.ClientId, args.OpId, args.GId, args.Key, args.Value})
 		}
 	}
 }
