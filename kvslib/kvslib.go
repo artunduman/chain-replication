@@ -266,12 +266,14 @@ func (d *KVS) handlePut(opId uint32, request Request) {
 
 	for {
 		d.Cond.L.Unlock()
+
 		// Invoke Put
 		err := d.Clients.HeadClient.Call(
 			"Server.Put",
 			putArgs,
 			&putReply,
 		)
+
 		d.Cond.L.Lock()
 
 		if err != nil && !d.Data.Done {
@@ -456,10 +458,12 @@ func (d *KVS) getHead() {
 		d.Data.HeadServerInfo.LocalPortIp,
 		servResp.ServerIpPort,
 	)
+
 	if err != nil {
 		// Head is down, retry
-		time.Sleep(time.Second)
+		time.Sleep(1 * time.Second)
 		d.getHead()
+
 		return
 	}
 
@@ -499,10 +503,12 @@ func (d *KVS) getTail() {
 		d.Data.TailServerInfo.LocalPortIp,
 		servResp.ServerIpPort,
 	)
+
 	if err != nil {
 		// Tail is down, retry
-		time.Sleep(time.Second)
+		time.Sleep(1 * time.Second)
 		d.getTail()
+
 		return
 	}
 
