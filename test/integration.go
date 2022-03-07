@@ -111,9 +111,17 @@ func startClient(clientId int) (*kvslib.KVS, kvslib.NotifyChannel, *tracing.Trac
 	return client, notifyCh, tracer, "client" + strconv.Itoa(clientId)
 }
 
+func testSuite(processes map[string]*os.Process) {
+	// Simple test for suite
+	client, _, _, _ := startClient(100)
+	defer client.Stop()
+
+	time.Sleep(5 * time.Second)
+}
+
 func testCyclingPutsAndGets(processes map[string]*os.Process) {
-	// Simple gets and puts
-	client, notifyCh, tracer, clientId := startClient(5)
+	// Cycling gets and puts
+	client, notifyCh, tracer, clientId := startClient(99)
 	defer client.Stop()
 
 	for i := 0; i < 2; i++ {
@@ -141,6 +149,28 @@ func testCyclingPutsAndGets(processes map[string]*os.Process) {
 	}
 
 	for i := 0; i < 6; i++ {
+		result := <-notifyCh
+		log.Println(result)
+	}
+}
+
+func testClientChCapacity(processes map[string]*os.Process) {
+	// Send 2000 gets and one put, gid should increment
+	client, notifyCh, tracer, clientId := startClient(98)
+	defer client.Stop()
+
+	for i := 0; i < 1000; i++ {
+		_, err := client.Put(tracer, clientId, strconv.Itoa(i), "value1")
+		if err != nil {
+			log.Println("Error putting key: ", err)
+		}
+		_, err = client.Get(tracer, clientId, strconv.Itoa(i))
+		if err != nil {
+			log.Println("Error getting key: ", err)
+		}
+	}
+	
+	for i := 0; i < 1024; i++ {
 		result := <-notifyCh
 		log.Println(result)
 	}
@@ -292,7 +322,9 @@ func main() {
 	build()
 	defer clean()
 	tests := []func(map[string]*os.Process){
+		//testSuite,
 		//testCyclingPutsAndGets,
+		testClientChCapacity,
 		//test0,
 		//test1,
 		//test2,
