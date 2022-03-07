@@ -459,6 +459,15 @@ func (d *KVS) getHead() {
 		},
 	)
 
+	client, err := util.GetRPCClient(
+		d.Data.HeadServerInfo.LocalPortIp,
+		servResp.ServerIpPort,
+	)
+	if err != nil {
+		// Head is down, return
+		return
+	}
+
 	d.Data.HeadServerInfo.ServerId = servResp.ServerId
 	d.Data.HeadServerInfo.RemotePortIp = servResp.ServerIpPort
 
@@ -466,10 +475,7 @@ func (d *KVS) getHead() {
 		d.Clients.HeadClient.Close()
 	}
 
-	d.Clients.HeadClient, _ = util.GetRPCClient(
-		d.Data.HeadServerInfo.LocalPortIp,
-		servResp.ServerIpPort,
-	)
+	d.Clients.HeadClient = client
 }
 
 func (d *KVS) getTail() {
@@ -494,6 +500,15 @@ func (d *KVS) getTail() {
 		},
 	)
 
+	client, err := util.GetRPCClient(
+		d.Data.TailServerInfo.LocalPortIp,
+		servResp.ServerIpPort,
+	)
+	if err != nil {
+		// Tail is down, return
+		return
+	}
+
 	d.Data.TailServerInfo.ServerId = servResp.ServerId
 	d.Data.TailServerInfo.RemotePortIp = servResp.ServerIpPort
 
@@ -501,10 +516,7 @@ func (d *KVS) getTail() {
 		d.Clients.TailClient.Close()
 	}
 
-	d.Clients.TailClient, _ = util.GetRPCClient(
-		d.Data.TailServerInfo.LocalPortIp,
-		servResp.ServerIpPort,
-	)
+	d.Clients.TailClient = client
 }
 
 // Stop Stops the KVS instance from communicating with the KVS and
