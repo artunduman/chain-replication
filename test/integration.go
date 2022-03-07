@@ -111,6 +111,41 @@ func startClient(clientId int) (*kvslib.KVS, kvslib.NotifyChannel, *tracing.Trac
 	return client, notifyCh, tracer, "client" + strconv.Itoa(clientId)
 }
 
+func testCyclingPutsAndGets(processes map[string]*os.Process) {
+	// Simple gets and puts
+	client, notifyCh, tracer, clientId := startClient(5)
+	defer client.Stop()
+
+	for i := 0; i < 2; i++ {
+		_, err := client.Get(tracer, clientId, "key1")
+		if err != nil {
+			log.Fatal("Error getting key: ", err)
+		}
+	}
+
+	_, err := client.Put(tracer, clientId, "key1", "value1")
+	if err != nil {
+		log.Fatal("Error putting key: ", err)
+	}
+
+	for i := 0; i < 2; i++ {
+		_, err := client.Get(tracer, clientId, "key1")
+		if err != nil {
+			log.Fatal("Error getting key: ", err)
+		}
+	}
+
+	_, err = client.Put(tracer, clientId, "key1", "value1")
+	if err != nil {
+		log.Fatal("Error putting key: ", err)
+	}
+
+	for i := 0; i < 6; i++ {
+		result := <-notifyCh
+		log.Println(result)
+	}
+}
+
 func test0(processes map[string]*os.Process) {
 	//Wait for servers to be up (easy case)
 	time.Sleep(time.Millisecond * 1000)
@@ -225,7 +260,7 @@ func test6(processes map[string]*os.Process) {
 	client, notifyCh, tracer, clientId := startClient(7)
 	defer client.Stop()
 
-	for i := 0; i < 1025; i++ {
+	for i := 0; i < 1024; i++ {
 		_, err := client.Get(tracer, clientId, "key1")
 		if err != nil {
 			log.Fatal("Error getting key: ", err)
@@ -257,13 +292,14 @@ func main() {
 	build()
 	defer clean()
 	tests := []func(map[string]*os.Process){
+		//testCyclingPutsAndGets,
 		//test0,
 		//test1,
 		//test2,
 		//test3,
 		//test4,
 		//test5,
-		test6,
+		//test6,
 	}
 	for testIndex, test := range tests {
 		log.Println("Starting test:", testIndex)
