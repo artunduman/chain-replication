@@ -264,6 +264,8 @@ func ack(conn *net.UDPConn) {
 				continue
 			}
 
+			time.Sleep(1 * time.Second)
+
 			hbeatMessage, _ := decodeHBeatMessage(rs.recvBuf, rs.len)
 
 			ackMessage := AckMessage{
