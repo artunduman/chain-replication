@@ -6,6 +6,7 @@ import (
 	"net/rpc"
 	"strconv"
 	"sync"
+	"time"
 
 	"cs.ubc.ca/cpsc416/a3/chainedkv"
 	"cs.ubc.ca/cpsc416/a3/util"
@@ -199,7 +200,6 @@ func (d *KVS) Start(localTracer *tracing.Tracer, clientId string, coordIPPort st
 }
 
 func (d *KVS) handleGet(opId uint32, request Request) {
-	var err error
 	var getReply interface{}
 
 	trace := request.Tracer.CreateTrace()
@@ -220,14 +220,12 @@ func (d *KVS) handleGet(opId uint32, request Request) {
 	for {
 		d.Cond.L.Unlock()
 
-		if d.Clients.TailClient != nil {
-			// Invoke Get
-			err = d.Clients.TailClient.Call(
-				"Server.Get",
-				getArgs,
-				&getReply,
-			)
-		}
+		// Invoke Get
+		err := d.Clients.TailClient.Call(
+			"Server.Get",
+			getArgs,
+			&getReply,
+		)
 
 		d.Cond.L.Lock()
 
@@ -247,7 +245,6 @@ func (d *KVS) handleGet(opId uint32, request Request) {
 }
 
 func (d *KVS) handlePut(opId uint32, request Request) {
-	var err error
 	var putReply interface{}
 
 	trace := request.Tracer.CreateTrace()
@@ -269,16 +266,12 @@ func (d *KVS) handlePut(opId uint32, request Request) {
 
 	for {
 		d.Cond.L.Unlock()
-
-		if d.Clients.HeadClient != nil {
-			// Invoke Put
-			err = d.Clients.HeadClient.Call(
-				"Server.Put",
-				putArgs,
-				&putReply,
-			)
-		}
-
+		// Invoke Put
+		err := d.Clients.HeadClient.Call(
+			"Server.Put",
+			putArgs,
+			&putReply,
+		)
 		d.Cond.L.Lock()
 
 		if err != nil && !d.Data.Done {
@@ -464,7 +457,9 @@ func (d *KVS) getHead() {
 		servResp.ServerIpPort,
 	)
 	if err != nil {
-		// Head is down, return
+		// Head is down, retry
+		time.Sleep(time.Second)
+		d.getHead()
 		return
 	}
 
@@ -505,7 +500,9 @@ func (d *KVS) getTail() {
 		servResp.ServerIpPort,
 	)
 	if err != nil {
-		// Tail is down, return
+		// Tail is down, retry
+		time.Sleep(time.Second)
+		d.getTail()
 		return
 	}
 
