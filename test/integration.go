@@ -144,12 +144,12 @@ func testMultiClientHeadCrashInFlight(processes map[string]*os.Process) {
 	//wait for servers to come up
 	time.Sleep(time.Millisecond * 1000)
 
-	for i := 1; i < 6; i++ {
+	for i := 1; i < 2; i++ {
 		processes["client"+strconv.Itoa(i)] = startClientProcess(i)
 	}
 
 	processes["server1"].Kill()
-	
+
 	time.Sleep(30 * time.Second)
 }
 

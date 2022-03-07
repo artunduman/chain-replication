@@ -6,6 +6,7 @@ import (
 	"net/rpc"
 	"strconv"
 	"sync"
+	"time"
 
 	"cs.ubc.ca/cpsc416/a3/chainedkv"
 	"cs.ubc.ca/cpsc416/a3/util"
@@ -227,6 +228,11 @@ func (d *KVS) handleGet(opId uint32, request Request) {
 				getArgs,
 				&getReply,
 			)
+		} else {
+			d.getTail()
+			time.Sleep(1 * time.Second)
+			d.Cond.L.Lock()
+			continue
 		}
 
 		d.Cond.L.Lock()
@@ -277,6 +283,11 @@ func (d *KVS) handlePut(opId uint32, request Request) {
 				putArgs,
 				&putReply,
 			)
+		} else {
+			d.getHead()
+			time.Sleep(1 * time.Second)
+			d.Cond.L.Lock()
+			continue
 		}
 
 		d.Cond.L.Lock()
