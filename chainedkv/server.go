@@ -511,10 +511,10 @@ func (s *Server) handlePut(trace *tracing.Trace, args PutArgs) error {
 		if !s.isHead() {
 			return err
 		} else {
-			time.Sleep(time.Second)
-			trace.RecordAction(PutRecvd{args.ClientId, args.OpId, args.Key, args.Value})
+			time.Sleep(1 * time.Second)
 
 			args.GId = s.nextPutGId
+
 			s.nextGetGId = args.GId + 1
 			s.nextPutGId = args.GId + PutGIdIncrement
 
@@ -525,8 +525,6 @@ func (s *Server) handlePut(trace *tracing.Trace, args PutArgs) error {
 				args.Key,
 				args.Value,
 			})
-
-			trace.RecordAction(PutFwdRecvd{args.ClientId, args.OpId, args.GId, args.Key, args.Value})
 		}
 	}
 }
