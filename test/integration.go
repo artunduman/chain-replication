@@ -1,16 +1,17 @@
 package main
 
 import (
-	"cs.ubc.ca/cpsc416/a3/chainedkv"
-	"cs.ubc.ca/cpsc416/a3/kvslib"
-	"cs.ubc.ca/cpsc416/a3/util"
-	"github.com/DistributedClocks/tracing"
 	"log"
 	"net"
 	"os"
 	"os/exec"
 	"strconv"
 	"time"
+
+	"cs.ubc.ca/cpsc416/a3/chainedkv"
+	"cs.ubc.ca/cpsc416/a3/kvslib"
+	"cs.ubc.ca/cpsc416/a3/util"
+	"github.com/DistributedClocks/tracing"
 )
 
 func build() {
@@ -120,79 +121,67 @@ func testSuite(processes map[string]*os.Process) {
 	client, _, _, _ := startClient(100)
 	defer client.Stop()
 
-	time.Sleep(5 * time.Second)
+	time.Sleep(20 * time.Second)
 }
 
 func testMultiClient(processes map[string]*os.Process) {
 	// Multiple client following ./test/cmd/client/main.go
-	// scuffed af i know
 
-	//wait for servers to come up
-	time.Sleep(time.Millisecond * 2000)
-
-	for i := 1; i < 6; i++ {
+	for i := 0; i < 5; i++ {
 		processes["client"+strconv.Itoa(i)] = startClientProcess(i)
 	}
 
-	time.Sleep(10 * time.Second)
+	for i := 0; i < 5; i++ {
+		processes["client"+strconv.Itoa(i)].Wait()
+	}
 }
 
 func testMultiClientHeadCrashInFlight(processes map[string]*os.Process) {
 	// Multiple client following ./test/cmd/client/main.go
-	// scuffed af i know
 
-	//wait for servers to come up
-	time.Sleep(time.Millisecond * 2000)
-
-	for i := 1; i < 6; i++ {
+	for i := 0; i < 5; i++ {
 		processes["client"+strconv.Itoa(i)] = startClientProcess(i)
 	}
 
 	processes["server1"].Kill()
 
-	time.Sleep(20 * time.Second)
+	for i := 0; i < 5; i++ {
+		processes["client"+strconv.Itoa(i)].Wait()
+	}
 }
 
 func testMultiClientTailCrashInFlight(processes map[string]*os.Process) {
 	// Multiple client following ./test/cmd/client/main.go
-	// scuffed af i know
 
-	//wait for servers to come up
-	time.Sleep(time.Millisecond * 2000)
-
-	for i := 1; i < 2; i++ {
+	for i := 0; i < 5; i++ {
 		processes["client"+strconv.Itoa(i)] = startClientProcess(i)
 	}
 
 	processes["server10"].Kill()
 
-	time.Sleep(20 * time.Second)
+	for i := 0; i < 5; i++ {
+		processes["client"+strconv.Itoa(i)].Wait()
+	}
 }
 
 func testMultiClientMiddleCrashInFlight(processes map[string]*os.Process) {
 	// Multiple client following ./test/cmd/client/main.go
-	// scuffed af i know
 
-	//wait for servers to come up
-	time.Sleep(time.Millisecond * 2000)
-
-	for i := 1; i < 6; i++ {
+	for i := 0; i < 5; i++ {
 		processes["client"+strconv.Itoa(i)] = startClientProcess(i)
 	}
 
 	processes["server5"].Kill()
 
-	time.Sleep(20 * time.Second)
+	for i := 0; i < 5; i++ {
+		processes["client"+strconv.Itoa(i)].Wait()
+	}
 }
 
 func testMultiClientMostCrashInFlight(processes map[string]*os.Process) {
 	// Multiple client following ./test/cmd/client/main.go
-	// scuffed af i know
 
-	//wait for servers to come up
-	time.Sleep(time.Millisecond * 1000)
-
-	for i := 1; i < 6; i++ {
+	for i := 0; i < 5; i++ {
 		processes["client"+strconv.Itoa(i)] = startClientProcess(i)
 	}
 
@@ -204,7 +193,9 @@ func testMultiClientMostCrashInFlight(processes map[string]*os.Process) {
 		processes["server"+strconv.Itoa(i)].Kill()
 	}
 
-	time.Sleep(20 * time.Second)
+	for i := 0; i < 5; i++ {
+		processes["client"+strconv.Itoa(i)].Wait()
+	}
 }
 
 func testCyclingPutsAndGets(processes map[string]*os.Process) {
@@ -261,7 +252,7 @@ func testClientChCapacity(processes map[string]*os.Process) {
 			log.Println("Error getting key: ", err)
 		}
 	}
-	
+
 	for i := 0; i < 1024; i++ {
 		result := <-notifyCh
 		log.Println(result)
@@ -272,7 +263,8 @@ func testKillHeadServerPreFlight(processes map[string]*os.Process) {
 	// Kill head server before client sends requests
 	client, notifyCh, tracer, clientId := startClient(98)
 	defer client.Stop()
-	
+
+	time.Sleep(10 * time.Second)
 	processes["server1"].Kill()
 
 	for i := 0; i < 50; i++ {
@@ -285,7 +277,7 @@ func testKillHeadServerPreFlight(processes map[string]*os.Process) {
 			log.Println("Error getting key: ", err)
 		}
 	}
-	
+
 	for i := 0; i < 100; i++ {
 		result := <-notifyCh
 		log.Println(result)
@@ -307,12 +299,12 @@ func testKillHeadServerInFlight(processes map[string]*os.Process) {
 			log.Println("Error getting key: ", err)
 		}
 	}
-	
+
 	for i := 0; i < 50; i++ {
 		result := <-notifyCh
 		log.Println(result)
 	}
-	
+
 	processes["server1"].Kill()
 
 	for i := 0; i < 50; i++ {
@@ -371,7 +363,9 @@ func test2(processes map[string]*os.Process) {
 		}
 	}
 
+	time.Sleep(5 * time.Second)
 	processes["server1"].Kill()
+
 	for i := 0; i < 10; i++ {
 		result := <-notifyCh
 		log.Println(result)
@@ -456,38 +450,55 @@ func teardown(processes map[string]*os.Process, testIndex int) {
 		process.Kill()
 	}
 	executeSync(
-		"mv", "./trace_output.log", "test/logs/tracing_"+strconv.Itoa(testIndex)+"_"+time.Now().String()+".log",
+		"cp", "./trace_output.log", "test/logs/tracing_"+strconv.Itoa(testIndex)+"_"+time.Now().String()+".log",
 	)
 	executeSync(
-		"mv", "./shiviz_output.log", "test/logs/shiviz_"+strconv.Itoa(testIndex)+"_"+time.Now().String()+".log",
+		"cp", "./shiviz_output.log", "test/logs/shiviz_"+strconv.Itoa(testIndex)+"_"+time.Now().String()+".log",
+	)
+	executeSync(
+		"bash", "test/runChecker.sh", strconv.Itoa(testIndex),
 	)
 }
 
 func main() {
+	numTestIter := 1
+
+	if len(os.Args) == 2 {
+		numTestIter, _ = strconv.Atoi(os.Args[1])
+	}
+
+	executeSync(
+		"rm", "-f", "test/checker_out.txt",
+	)
+
 	build()
 	defer clean()
+
 	tests := []func(map[string]*os.Process){
-		//testSuite,
-		//testMultiClient,
-		//testMultiClientHeadCrashInFlight,
-		//testMultiClientTailCrashInFlight,
-		testMultiClientMiddleCrashInFlight,
-		//testMultiClientMostCrashInFlight,
-		//testCyclingPutsAndGets,
-		//testClientChCapacity,
-		//testKillHeadServerPreFlight,
-		//testKillHeadServerInFlight,
-		//test0,
-		//test1,
-		//test2,
-		//test3,
-		//test4,
-		//test5,
-		//test6,
+		// testSuite,
+		// testMultiClient,
+		testMultiClientHeadCrashInFlight,
+		// testMultiClientTailCrashInFlight,
+		// testMultiClientMiddleCrashInFlight,
+		// testMultiClientMostCrashInFlight,
+		// testCyclingPutsAndGets,
+		// testClientChCapacity,
+		// testKillHeadServerPreFlight,
+		// testKillHeadServerInFlight,
+		// test0,
+		// test1,
+		// test2,
+		// test3,
+		// test4,
+		// test5,
+		// test6,
 	}
-	for testIndex, test := range tests {
-		log.Println("Starting test:", testIndex)
-		runTest(test, testIndex)
+
+	for i := 0; i < numTestIter; i++ {
+		for testIndex, test := range tests {
+			log.Println("Starting test:", testIndex)
+			runTest(test, testIndex)
+		}
 	}
 }
 
