@@ -14,14 +14,6 @@ import (
 	"github.com/DistributedClocks/tracing"
 )
 
-func build() {
-	executeSync("make", "-C", "./test/", "all")
-}
-
-func clean() {
-	executeSync("make", "-C", "./test/", "clean")
-}
-
 func setup(numServers int) map[string]*os.Process {
 	processes := make(map[string]*os.Process)
 
@@ -145,6 +137,7 @@ func testMultiClientHeadCrashInFlight(processes map[string]*os.Process) {
 		processes["client"+strconv.Itoa(i)] = startClientProcess(i)
 	}
 
+	time.Sleep(200 * time.Millisecond)
 	processes["server1"].Kill()
 
 	for i := 0; i < 5; i++ {
@@ -161,6 +154,7 @@ func testMultiClientTailCrashInFlight(processes map[string]*os.Process) {
 		processes["client"+strconv.Itoa(i)] = startClientProcess(i)
 	}
 
+	time.Sleep(200 * time.Millisecond)
 	processes["server10"].Kill()
 
 	for i := 0; i < 5; i++ {
@@ -177,6 +171,7 @@ func testMultiClientMiddleCrashInFlight(processes map[string]*os.Process) {
 		processes["client"+strconv.Itoa(i)] = startClientProcess(i)
 	}
 
+	time.Sleep(200 * time.Millisecond)
 	processes["server5"].Kill()
 
 	for i := 0; i < 5; i++ {
@@ -195,10 +190,14 @@ func testMultiClientMostCrashInFlight(processes map[string]*os.Process) {
 
 	// numServers = 10, rehardcode this if changes
 	for i := 1; i < 5; i++ {
+		time.Sleep(200 * time.Millisecond)
 		processes["server"+strconv.Itoa(i)].Kill()
+		time.Sleep(200 * time.Millisecond)
 	}
 	for i := 6; i <= 10; i++ {
+		time.Sleep(200 * time.Millisecond)
 		processes["server"+strconv.Itoa(i)].Kill()
+		time.Sleep(200 * time.Millisecond)
 	}
 
 	for i := 0; i < 5; i++ {
@@ -241,38 +240,12 @@ func testCyclingPutsAndGets(processes map[string]*os.Process) {
 	}
 }
 
-func testClientChCapacity(processes map[string]*os.Process) {
-	// Send 2000 gets and one put, gid should increment
-
-	// NOTE: does not work atm since concurrent connections on thetis limit heartbeat
-	// long enough for fcheck to mark it as down, but not long enough
-	// for client to think so, thus invalidating this test
-	client, notifyCh, tracer, clientId := startClient(98)
-	defer client.Stop()
-
-	for i := 0; i < 1000; i++ {
-		_, err := client.Put(tracer, clientId, strconv.Itoa(i), "value1")
-		if err != nil {
-			log.Println("Error putting key: ", err)
-		}
-		_, err = client.Get(tracer, clientId, strconv.Itoa(i))
-		if err != nil {
-			log.Println("Error getting key: ", err)
-		}
-	}
-
-	for i := 0; i < 1024; i++ {
-		result := <-notifyCh
-		log.Println(result)
-	}
-}
-
 func testKillHeadServerPreFlight(processes map[string]*os.Process) {
 	// Kill head server before client sends requests
 	client, notifyCh, tracer, clientId := startClient(98)
 	defer client.Stop()
 
-	time.Sleep(10 * time.Second)
+	time.Sleep(30 * time.Second)
 	processes["server1"].Kill()
 
 	for i := 0; i < 50; i++ {
@@ -313,6 +286,7 @@ func testKillHeadServerInFlight(processes map[string]*os.Process) {
 		log.Println(result)
 	}
 
+	time.Sleep(30 * time.Second)
 	processes["server1"].Kill()
 
 	for i := 0; i < 50; i++ {
@@ -479,27 +453,23 @@ func main() {
 		"rm", "-f", "test/checker_out.txt",
 	)
 
-	build()
-	defer clean()
-
 	tests := []func(map[string]*os.Process){
-		// testSuite,
-		// testMultiClient,
+		testSuite,
+		testMultiClient,
 		testMultiClientHeadCrashInFlight,
-		// testMultiClientTailCrashInFlight,
-		// testMultiClientMiddleCrashInFlight,
-		// testMultiClientMostCrashInFlight,
-		// testCyclingPutsAndGets,
-		// testClientChCapacity,
-		// testKillHeadServerPreFlight,
-		// testKillHeadServerInFlight,
-		// test0,
-		// test1,
-		// test2,
-		// test3,
-		// test4,
-		// test5,
-		// test6,
+		testMultiClientTailCrashInFlight,
+		testMultiClientMiddleCrashInFlight,
+		testMultiClientMostCrashInFlight,
+		testCyclingPutsAndGets,
+		testKillHeadServerPreFlight,
+		testKillHeadServerInFlight,
+		test0,
+		test1,
+		test2,
+		test3,
+		test4,
+		test5,
+		test6,
 	}
 
 	for i := 0; i < numTestIter; i++ {
