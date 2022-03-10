@@ -137,8 +137,8 @@ type Server struct {
 	Trace            *tracing.Trace
 	Coord            *rpc.Client
 	KVS              map[string]string
-	nextGetGId       uint64
-	nextPutGId       uint64
+	NextGetGId       uint64
+	NextPutGId       uint64
 	mu               sync.Mutex
 	ServerServerAddr string
 }
@@ -188,7 +188,7 @@ type ServerFailArgs struct {
 }
 
 type UpdateGIdArgs struct {
-	nextPutGId uint64
+	NextPutGId uint64
 }
 
 const PutGIdIncrement uint64 = 1024
@@ -214,8 +214,8 @@ func (s *Server) Start(serverId uint8, coordAddr string, serverAddr string,
 	s.Trace = s.Tracer.CreateTrace()
 	s.Trace.RecordAction(ServerStart{s.Id})
 
-	s.nextPutGId = PutGIdIncrement
-	s.nextGetGId = 0
+	s.NextPutGId = PutGIdIncrement
+	s.NextGetGId = 0
 
 	err := rpc.Register(s)
 
@@ -371,8 +371,8 @@ func (s *Server) ServerFailNewNextServer(args ServerFailArgs, reply *tracing.Tra
 	*reply = trace.GenerateToken()
 
 	if s.isHead() && s.isTail() {
-		s.nextGetGId = s.nextPutGId + 1
-		s.nextPutGId += PutGIdIncrement
+		s.NextGetGId = s.NextPutGId + 1
+		s.NextPutGId += PutGIdIncrement
 	}
 
 	return nil
@@ -405,8 +405,8 @@ func (s *Server) ServerFailNewPrevServer(args ServerFailArgs, reply *tracing.Tra
 	*reply = trace.GenerateToken()
 
 	if s.isHead() && s.isTail() {
-		s.nextGetGId = s.nextPutGId + 1
-		s.nextPutGId += PutGIdIncrement
+		s.NextGetGId = s.NextPutGId + 1
+		s.NextPutGId += PutGIdIncrement
 	}
 
 	return nil
@@ -481,16 +481,16 @@ func (s *Server) handlePut(trace *tracing.Trace, args PutArgs) error {
 	var err error
 	var reply interface{}
 
-	if args.GId < s.nextPutGId {
+	if args.GId < s.NextPutGId {
 		s.updateGId(UpdateGIdArgs{
-			s.nextPutGId,
+			s.NextPutGId,
 		}, &reply)
 
 		return errors.New("Server.Put: GId not large enough")
 	}
 
-	s.nextGetGId = args.GId + 1
-	s.nextPutGId = args.GId + PutGIdIncrement
+	s.NextGetGId = args.GId + 1
+	s.NextPutGId = args.GId + PutGIdIncrement
 
 	// Keep trying until server becomes tail
 	for {
@@ -513,10 +513,10 @@ func (s *Server) handlePut(trace *tracing.Trace, args PutArgs) error {
 		} else {
 			time.Sleep(1 * time.Second)
 
-			args.GId = s.nextPutGId
+			args.GId = s.NextPutGId
 
-			s.nextGetGId = args.GId + 1
-			s.nextPutGId = args.GId + PutGIdIncrement
+			s.NextGetGId = args.GId + 1
+			s.NextPutGId = args.GId + PutGIdIncrement
 
 			trace.RecordAction(PutOrdered{
 				args.ClientId,
@@ -540,7 +540,7 @@ func (s *Server) Put(args PutArgs, reply *interface{}) error {
 	if s.isHead() {
 		trace.RecordAction(PutRecvd{args.ClientId, args.OpId, args.Key, args.Value})
 
-		args.GId = s.nextPutGId
+		args.GId = s.NextPutGId
 
 		trace.RecordAction(PutOrdered{
 			args.ClientId,
@@ -581,18 +581,18 @@ func (s *Server) Get(args GetArgs, reply *interface{}) error {
 		return err
 	}
 
-	replyArgs.GId = s.nextGetGId
+	replyArgs.GId = s.NextGetGId
 	replyArgs.OpId = args.OpId
 	replyArgs.Key = args.Key
 	replyArgs.Value = s.KVS[args.Key]
 
-	if s.nextGetGId == s.nextPutGId {
+	if s.NextGetGId == s.NextPutGId {
 		s.updateGId(UpdateGIdArgs{
-			s.nextPutGId + PutGIdIncrement,
+			s.NextPutGId + PutGIdIncrement,
 		}, &rpcReply)
 	}
 
-	s.nextGetGId++
+	s.NextGetGId++
 
 	trace.RecordAction(GetOrdered{
 		args.ClientId,
@@ -629,13 +629,13 @@ func (s *Server) UpdateGId(updateGIdArgs UpdateGIdArgs, reply *interface{}) erro
 }
 
 func (s *Server) updateGId(updateGIdArgs UpdateGIdArgs, reply *interface{}) {
-	s.nextPutGId = updateGIdArgs.nextPutGId
+	s.NextPutGId = updateGIdArgs.NextPutGId
 
 	// Keep trying until server becomes head
 	for !s.isHead() {
 		err := s.PrevServer.Call(
 			"Server.UpdateGId",
-			UpdateGIdArgs{s.nextPutGId},
+			UpdateGIdArgs{s.NextPutGId},
 			&reply,
 		)
 
