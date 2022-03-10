@@ -139,6 +139,8 @@ func testMultiClient(processes map[string]*os.Process) {
 func testMultiClientHeadCrashInFlight(processes map[string]*os.Process) {
 	// Multiple client following ./test/cmd/client/main.go
 
+	time.Sleep(20 * time.Second)
+
 	for i := 0; i < 5; i++ {
 		processes["client"+strconv.Itoa(i)] = startClientProcess(i)
 	}
@@ -152,6 +154,8 @@ func testMultiClientHeadCrashInFlight(processes map[string]*os.Process) {
 
 func testMultiClientTailCrashInFlight(processes map[string]*os.Process) {
 	// Multiple client following ./test/cmd/client/main.go
+
+	time.Sleep(20 * time.Second)
 
 	for i := 0; i < 5; i++ {
 		processes["client"+strconv.Itoa(i)] = startClientProcess(i)
@@ -167,6 +171,8 @@ func testMultiClientTailCrashInFlight(processes map[string]*os.Process) {
 func testMultiClientMiddleCrashInFlight(processes map[string]*os.Process) {
 	// Multiple client following ./test/cmd/client/main.go
 
+	time.Sleep(20 * time.Second)
+
 	for i := 0; i < 5; i++ {
 		processes["client"+strconv.Itoa(i)] = startClientProcess(i)
 	}
@@ -180,6 +186,8 @@ func testMultiClientMiddleCrashInFlight(processes map[string]*os.Process) {
 
 func testMultiClientMostCrashInFlight(processes map[string]*os.Process) {
 	// Multiple client following ./test/cmd/client/main.go
+
+	time.Sleep(20 * time.Second)
 
 	for i := 0; i < 5; i++ {
 		processes["client"+strconv.Itoa(i)] = startClientProcess(i)
