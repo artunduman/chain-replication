@@ -354,14 +354,10 @@ func (s *Server) ServerFailNewNextServer(args ServerFailArgs, reply *tracing.Tra
 	if args.NewServerAddr == nil {
 		s.NextServer = nil
 	} else {
-		nextServer, err := util.SplitAndGetRPCClient(
+		nextServer, _ := util.SplitAndGetRPCClient(
 			s.ServerServerAddr,
 			*args.NewServerAddr,
 		)
-
-		if err != nil {
-			return err
-		}
 
 		s.NextServer = nextServer
 		trace.RecordAction(NewFailoverSuccessor{args.NewServerId})
@@ -388,14 +384,10 @@ func (s *Server) ServerFailNewPrevServer(args ServerFailArgs, reply *tracing.Tra
 	if args.NewServerAddr == nil {
 		s.PrevServer = nil
 	} else {
-		prevServer, err := util.SplitAndGetRPCClient(
+		prevServer, _ := util.SplitAndGetRPCClient(
 			s.ServerServerAddr,
 			*args.NewServerAddr,
 		)
-
-		if err != nil {
-			return err
-		}
 
 		s.PrevServer = prevServer
 		trace.RecordAction(NewFailoverPredecessor{args.NewServerId})
@@ -420,7 +412,7 @@ func (s *Server) isHead() bool {
 	return s.PrevServer == nil
 }
 
-func (s *Server) putFwd(trace *tracing.Trace, args PutArgs) error {
+func (s *Server) putFwd(trace *tracing.Trace, args PutArgs, nextServer *rpc.Client) error {
 	var reply interface{}
 
 	trace.RecordAction(PutFwd{
@@ -432,10 +424,15 @@ func (s *Server) putFwd(trace *tracing.Trace, args PutArgs) error {
 	})
 
 	args.Token = trace.GenerateToken()
-	err := s.NextServer.Call("Server.Put", args, &reply)
 
-	if err != nil {
-		return err
+	if nextServer != nil {
+		err := nextServer.Call("Server.Put", args, &reply)
+
+		if err != nil {
+			return err
+		}
+	} else {
+		return errors.New("Server.Put: next server is null")
 	}
 
 	return nil
@@ -478,6 +475,7 @@ func (s *Server) putTail(trace *tracing.Trace, args PutArgs) error {
 }
 
 func (s *Server) handlePut(trace *tracing.Trace, args PutArgs) error {
+	var nextServer *rpc.Client
 	var err error
 	var reply interface{}
 
@@ -494,12 +492,20 @@ func (s *Server) handlePut(trace *tracing.Trace, args PutArgs) error {
 
 	// Keep trying until server becomes tail
 	for {
+		if !s.isTail() {
+			if s.NextServer != nil {
+				nextServer = s.NextServer
+			} else {
+				nextServer = nil
+			}
+		}
+
 		s.mu.Unlock()
 
 		if s.isTail() {
 			err = s.putTail(trace, args)
 		} else {
-			err = s.putFwd(trace, args)
+			err = s.putFwd(trace, args, nextServer)
 		}
 
 		s.mu.Lock()
@@ -633,14 +639,19 @@ func (s *Server) updateGId(updateGIdArgs UpdateGIdArgs, reply *interface{}) {
 
 	// Keep trying until server becomes head
 	for !s.isHead() {
-		err := s.PrevServer.Call(
-			"Server.UpdateGId",
-			UpdateGIdArgs{s.NextPutGId},
-			&reply,
-		)
+		if s.PrevServer != nil {
+			err := s.PrevServer.Call(
+				"Server.UpdateGId",
+				UpdateGIdArgs{s.NextPutGId},
+				&reply,
+			)
 
-		if err == nil {
-			break
+			if err == nil {
+				break
+			}
+		} else {
+			s.mu.Unlock()
+			s.mu.Lock()
 		}
 	}
 }

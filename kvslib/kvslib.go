@@ -454,7 +454,11 @@ func (d *KVS) getHead() {
 		},
 	)
 
-	client, err := util.GetRPCClient(
+	if d.Clients.HeadClient != nil {
+		d.Clients.HeadClient.Close()
+	}
+
+	client, err := util.SplitAndGetRPCClient(
 		d.Data.HeadServerInfo.LocalPortIp,
 		servResp.ServerIpPort,
 	)
@@ -469,10 +473,6 @@ func (d *KVS) getHead() {
 
 	d.Data.HeadServerInfo.ServerId = servResp.ServerId
 	d.Data.HeadServerInfo.RemotePortIp = servResp.ServerIpPort
-
-	if d.Clients.HeadClient != nil {
-		d.Clients.HeadClient.Close()
-	}
 
 	d.Clients.HeadClient = client
 }
@@ -499,7 +499,11 @@ func (d *KVS) getTail() {
 		},
 	)
 
-	client, err := util.GetRPCClient(
+	if d.Clients.TailClient != nil {
+		d.Clients.TailClient.Close()
+	}
+
+	client, err := util.SplitAndGetRPCClient(
 		d.Data.TailServerInfo.LocalPortIp,
 		servResp.ServerIpPort,
 	)
@@ -514,10 +518,6 @@ func (d *KVS) getTail() {
 
 	d.Data.TailServerInfo.ServerId = servResp.ServerId
 	d.Data.TailServerInfo.RemotePortIp = servResp.ServerIpPort
-
-	if d.Clients.TailClient != nil {
-		d.Clients.TailClient.Close()
-	}
 
 	d.Clients.TailClient = client
 }

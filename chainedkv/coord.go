@@ -314,29 +314,33 @@ func (c *Coord) handleFailure(serverId uint8) {
 	if prevAddr != nil {
 		prevClient := c.DiscoveredServers[prevServerId].Client
 
-		prevClient.Call("Server.ServerFailNewNextServer", ServerFailArgs{
+		err := prevClient.Call("Server.ServerFailNewNextServer", ServerFailArgs{
 			serverId,
 			nextAddr,
 			nextServerId,
 			c.Trace.GenerateToken(),
 		}, &tokenRecvd)
 
-		c.Trace = c.Tracer.ReceiveToken(tokenRecvd)
-		c.Trace.RecordAction(ServerFailHandledRecvd{serverId, prevServerId})
+		if err == nil {
+			c.Trace = c.Tracer.ReceiveToken(tokenRecvd)
+			c.Trace.RecordAction(ServerFailHandledRecvd{serverId, prevServerId})
+		}
 	}
 
 	if nextAddr != nil {
 		nextClient := c.DiscoveredServers[nextServerId].Client
 
-		nextClient.Call("Server.ServerFailNewPrevServer", ServerFailArgs{
+		err := nextClient.Call("Server.ServerFailNewPrevServer", ServerFailArgs{
 			serverId,
 			prevAddr,
 			prevServerId,
 			c.Trace.GenerateToken(),
 		}, &tokenRecvd)
 
-		c.Trace = c.Tracer.ReceiveToken(tokenRecvd)
-		c.Trace.RecordAction(ServerFailHandledRecvd{serverId, nextServerId})
+		if err == nil {
+			c.Trace = c.Tracer.ReceiveToken(tokenRecvd)
+			c.Trace.RecordAction(ServerFailHandledRecvd{serverId, nextServerId})
+		}
 	}
 
 	c.Trace.RecordAction(NewChain{c.CurrChain})
