@@ -421,7 +421,7 @@ func test6(processes map[string]*os.Process) {
 	if err != nil {
 		log.Fatal("Error putting key: ", err)
 	}
-	for i := 0; i < 1026; i++ {
+	for i := 0; i < 1025; i++ {
 		result := <-notifyCh
 		log.Println(result)
 	}
