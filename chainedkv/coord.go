@@ -76,6 +76,7 @@ type CoordConfig struct {
 type ServerNode struct {
 	ServerId     uint8
 	RemoteIpPort string
+	ClientIpPort string
 	Client       *rpc.Client
 	AckIpPort    string
 }
@@ -94,6 +95,7 @@ type NodeResponse struct {
 type JoinArgs struct {
 	ServerId   uint8
 	ServerAddr string
+	ClientAddr string
 	AckIpPort  string
 	Token      tracing.TracingToken
 }
@@ -215,6 +217,7 @@ func (c *Coord) Join(args JoinArgs, reply *JoinReply) error {
 	c.DiscoveredServers[args.ServerId] = &ServerNode{
 		ServerId:     args.ServerId,
 		RemoteIpPort: args.ServerAddr,
+		ClientIpPort: args.ClientAddr,
 		Client:       client,
 		AckIpPort:    args.AckIpPort,
 	}
@@ -380,7 +383,7 @@ func (c *Coord) GetHead(args NodeRequest, reply *NodeResponse) error {
 	}
 
 	reply.ServerId = c.CurrChain[0]
-	reply.ServerIpPort = c.DiscoveredServers[reply.ServerId].RemoteIpPort
+	reply.ServerIpPort = c.DiscoveredServers[reply.ServerId].ClientIpPort
 
 	trace.RecordAction(HeadRes{args.ClientId, reply.ServerId})
 	reply.Token = trace.GenerateToken()
@@ -401,7 +404,7 @@ func (c *Coord) GetTail(args NodeRequest, reply *NodeResponse) error {
 	}
 
 	reply.ServerId = c.CurrChain[len(c.CurrChain)-1]
-	reply.ServerIpPort = c.DiscoveredServers[reply.ServerId].RemoteIpPort
+	reply.ServerIpPort = c.DiscoveredServers[reply.ServerId].ClientIpPort
 
 	trace.RecordAction(TailRes{args.ClientId, reply.ServerId})
 	reply.Token = trace.GenerateToken()

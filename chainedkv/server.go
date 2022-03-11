@@ -270,7 +270,13 @@ func (s *Server) Start(serverId uint8, coordAddr string, serverAddr string,
 	s.Trace.RecordAction(ServerJoining{s.Id})
 	err = s.Coord.Call(
 		"Coord.Join",
-		JoinArgs{serverId, serverListenAddr, ackIpPort, s.Trace.GenerateToken()},
+		JoinArgs{
+			serverId,
+			serverListenAddr,
+			clientListenAddr,
+			ackIpPort,
+			s.Trace.GenerateToken(),
+		},
 		&coordJoinReply,
 	)
 
