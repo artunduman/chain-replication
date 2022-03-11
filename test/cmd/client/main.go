@@ -1,7 +1,12 @@
+// Not used by integration.go
+
 package main
 
 import (
 	"log"
+	"net"
+	"os"
+	"strconv"
 
 	"cs.ubc.ca/cpsc416/a3/chainedkv"
 	"cs.ubc.ca/cpsc416/a3/kvslib"
@@ -14,25 +19,57 @@ func main() {
 	err := util.ReadJSONConfig("test/config/client_config.json", &config)
 	util.CheckErr(err, "Error reading client config: %v\n", err)
 
+	if len(os.Args) != 2 {
+		log.Fatalf("Usage: %s <clientId>", os.Args[0])
+	}
+	clientId, err := strconv.Atoi(os.Args[1])
+	if err != nil {
+		log.Fatalf("Usage: %s <clientId>", os.Args[0])
+	}
+
 	tracer := tracing.NewTracer(tracing.TracerConfig{
 		ServerAddress:  config.TracingServerAddr,
-		TracerIdentity: config.TracingIdentity,
+		TracerIdentity: "client" + strconv.Itoa(clientId),
 		Secret:         config.Secret,
 	})
 
 	client := kvslib.NewKVS()
-	notifCh, err := client.Start(tracer, config.ClientID, config.CoordIPPort, config.LocalCoordIPPort, config.LocalHeadServerIPPort, config.LocalTailServerIPPort, config.ChCapacity)
-	util.CheckErr(err, "Error reading client config: %v\n", err)
+	clientHost, _, _ := net.SplitHostPort(config.LocalCoordIPPort)
 
-	// Put a key-value pair
-	op, err := client.Put(tracer, "clientID1", "key2", "value2")
-	util.CheckErr(err, "Error putting value %v, opId: %v\b", err, op)
+	ports := make([]int, 3)
+	for i := 0; i < 3; i++ {
+		port, err := util.GetFreeTCPPort(clientHost)
+		if err != nil {
+			log.Fatal("Error getting free port: ", err)
+		}
+		ports[i] = port
+	}
 
-	// Get a key's value
-	op, err = client.Get(tracer, "clientID1", "key1")
-	util.CheckErr(err, "Error getting value %v, opId: %v\b", err, op)
+	notifCh, err := client.Start(
+		tracer,
+		"client"+strconv.Itoa(clientId),
+		config.CoordIPPort,
+		net.JoinHostPort(clientHost, strconv.Itoa(ports[0])),
+		net.JoinHostPort(clientHost, strconv.Itoa(ports[1])),
+		net.JoinHostPort(clientHost, strconv.Itoa(ports[2])),
+		config.ChCapacity,
+	)
+	if err != nil {
+		log.Fatalf("Error starting client: %v\n", err)
+	}
 
-	for i := 0; i < 2; i++ {
+	for i := 0; i < 20; i++ {
+		_, err := client.Put(tracer, "client"+strconv.Itoa(clientId), strconv.Itoa(i), "value1")
+		if err != nil {
+			log.Println("Error putting key: ", err)
+		}
+		_, err = client.Get(tracer, "client"+strconv.Itoa(clientId), strconv.Itoa(i))
+		if err != nil {
+			log.Println("Error getting key: ", err)
+		}
+	}
+
+	for i := 0; i < 40; i++ {
 		result := <-notifCh
 		log.Println(result)
 	}

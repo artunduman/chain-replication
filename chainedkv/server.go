@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"sync"
 	"syscall"
+	"time"
 
 	fchecker "cs.ubc.ca/cpsc416/a3/fcheck"
 	"cs.ubc.ca/cpsc416/a3/util"
@@ -136,8 +137,8 @@ type Server struct {
 	Trace            *tracing.Trace
 	Coord            *rpc.Client
 	KVS              map[string]string
-	nextGetGId       uint64
-	nextPutGId       uint64
+	NextGetGId       uint64
+	NextPutGId       uint64
 	mu               sync.Mutex
 	ServerServerAddr string
 }
@@ -187,7 +188,7 @@ type ServerFailArgs struct {
 }
 
 type UpdateGIdArgs struct {
-	nextPutGId uint64
+	NextPutGId uint64
 }
 
 const PutGIdIncrement uint64 = 1024
@@ -213,8 +214,8 @@ func (s *Server) Start(serverId uint8, coordAddr string, serverAddr string,
 	s.Trace = s.Tracer.CreateTrace()
 	s.Trace.RecordAction(ServerStart{s.Id})
 
-	s.nextPutGId = PutGIdIncrement
-	s.nextGetGId = 0
+	s.NextPutGId = PutGIdIncrement
+	s.NextGetGId = 0
 
 	err := rpc.Register(s)
 
@@ -269,7 +270,13 @@ func (s *Server) Start(serverId uint8, coordAddr string, serverAddr string,
 	s.Trace.RecordAction(ServerJoining{s.Id})
 	err = s.Coord.Call(
 		"Coord.Join",
-		JoinArgs{serverId, serverListenAddr, ackIpPort, s.Trace.GenerateToken()},
+		JoinArgs{
+			serverId,
+			serverListenAddr,
+			clientListenAddr,
+			ackIpPort,
+			s.Trace.GenerateToken(),
+		},
 		&coordJoinReply,
 	)
 
@@ -353,14 +360,10 @@ func (s *Server) ServerFailNewNextServer(args ServerFailArgs, reply *tracing.Tra
 	if args.NewServerAddr == nil {
 		s.NextServer = nil
 	} else {
-		nextServer, err := util.SplitAndGetRPCClient(
+		nextServer, _ := util.SplitAndGetRPCClient(
 			s.ServerServerAddr,
 			*args.NewServerAddr,
 		)
-
-		if err != nil {
-			return err
-		}
 
 		s.NextServer = nextServer
 		trace.RecordAction(NewFailoverSuccessor{args.NewServerId})
@@ -370,8 +373,8 @@ func (s *Server) ServerFailNewNextServer(args ServerFailArgs, reply *tracing.Tra
 	*reply = trace.GenerateToken()
 
 	if s.isHead() && s.isTail() {
-		s.nextGetGId = s.nextPutGId + 1
-		s.nextPutGId += PutGIdIncrement
+		s.NextGetGId = s.NextPutGId + 1
+		s.NextPutGId += PutGIdIncrement
 	}
 
 	return nil
@@ -387,14 +390,10 @@ func (s *Server) ServerFailNewPrevServer(args ServerFailArgs, reply *tracing.Tra
 	if args.NewServerAddr == nil {
 		s.PrevServer = nil
 	} else {
-		prevServer, err := util.SplitAndGetRPCClient(
+		prevServer, _ := util.SplitAndGetRPCClient(
 			s.ServerServerAddr,
 			*args.NewServerAddr,
 		)
-
-		if err != nil {
-			return err
-		}
 
 		s.PrevServer = prevServer
 		trace.RecordAction(NewFailoverPredecessor{args.NewServerId})
@@ -404,8 +403,8 @@ func (s *Server) ServerFailNewPrevServer(args ServerFailArgs, reply *tracing.Tra
 	*reply = trace.GenerateToken()
 
 	if s.isHead() && s.isTail() {
-		s.nextGetGId = s.nextPutGId + 1
-		s.nextPutGId += PutGIdIncrement
+		s.NextGetGId = s.NextPutGId + 1
+		s.NextPutGId += PutGIdIncrement
 	}
 
 	return nil
@@ -419,7 +418,7 @@ func (s *Server) isHead() bool {
 	return s.PrevServer == nil
 }
 
-func (s *Server) putFwd(trace *tracing.Trace, args PutArgs) error {
+func (s *Server) putFwd(trace *tracing.Trace, args PutArgs, nextServer *rpc.Client) error {
 	var reply interface{}
 
 	trace.RecordAction(PutFwd{
@@ -431,10 +430,15 @@ func (s *Server) putFwd(trace *tracing.Trace, args PutArgs) error {
 	})
 
 	args.Token = trace.GenerateToken()
-	err := s.NextServer.Call("Server.Put", args, &reply)
 
-	if err != nil {
-		return err
+	if nextServer != nil {
+		err := nextServer.Call("Server.Put", args, &reply)
+
+		if err != nil {
+			return err
+		}
+	} else {
+		return errors.New("Server.Put: next server is null")
 	}
 
 	return nil
@@ -452,6 +456,8 @@ func (s *Server) putTail(trace *tracing.Trace, args PutArgs) error {
 	if err != nil {
 		return err
 	}
+
+	defer client.Close()
 
 	replyArgs.GId = args.GId
 	replyArgs.OpId = args.OpId
@@ -477,34 +483,62 @@ func (s *Server) putTail(trace *tracing.Trace, args PutArgs) error {
 }
 
 func (s *Server) handlePut(trace *tracing.Trace, args PutArgs) error {
+	var nextServer *rpc.Client
 	var err error
 	var reply interface{}
 
-	if args.GId < s.nextPutGId {
+	if args.GId < s.NextPutGId {
 		s.updateGId(UpdateGIdArgs{
-			s.nextPutGId,
+			s.NextPutGId,
 		}, &reply)
 
 		return errors.New("Server.Put: GId not large enough")
 	}
 
-	s.nextGetGId = args.GId + 1
-	s.nextPutGId = args.GId + PutGIdIncrement
+	s.NextGetGId = args.GId + 1
+	s.NextPutGId = args.GId + PutGIdIncrement
 
 	// Keep trying until server becomes tail
 	for {
+		if !s.isTail() {
+			if s.NextServer != nil {
+				nextServer = s.NextServer
+			} else {
+				nextServer = nil
+			}
+		}
+
 		s.mu.Unlock()
 
 		if s.isTail() {
 			err = s.putTail(trace, args)
 		} else {
-			err = s.putFwd(trace, args)
+			err = s.putFwd(trace, args, nextServer)
 		}
 
 		s.mu.Lock()
 
 		if err == nil {
 			return nil
+		}
+
+		if !s.isHead() {
+			return err
+		} else {
+			time.Sleep(1 * time.Second)
+
+			args.GId = s.NextPutGId
+
+			s.NextGetGId = args.GId + 1
+			s.NextPutGId = args.GId + PutGIdIncrement
+
+			trace.RecordAction(PutOrdered{
+				args.ClientId,
+				args.OpId,
+				args.GId,
+				args.Key,
+				args.Value,
+			})
 		}
 	}
 }
@@ -520,7 +554,7 @@ func (s *Server) Put(args PutArgs, reply *interface{}) error {
 	if s.isHead() {
 		trace.RecordAction(PutRecvd{args.ClientId, args.OpId, args.Key, args.Value})
 
-		args.GId = s.nextPutGId
+		args.GId = s.NextPutGId
 
 		trace.RecordAction(PutOrdered{
 			args.ClientId,
@@ -561,18 +595,20 @@ func (s *Server) Get(args GetArgs, reply *interface{}) error {
 		return err
 	}
 
-	replyArgs.GId = s.nextGetGId
+	defer client.Close()
+
+	replyArgs.GId = s.NextGetGId
 	replyArgs.OpId = args.OpId
 	replyArgs.Key = args.Key
 	replyArgs.Value = s.KVS[args.Key]
 
-	if s.nextGetGId == s.nextPutGId {
+	if s.NextGetGId == s.NextPutGId {
 		s.updateGId(UpdateGIdArgs{
-			s.nextPutGId + PutGIdIncrement,
+			s.NextPutGId + PutGIdIncrement,
 		}, &rpcReply)
 	}
 
-	s.nextGetGId++
+	s.NextGetGId++
 
 	trace.RecordAction(GetOrdered{
 		args.ClientId,
@@ -609,18 +645,23 @@ func (s *Server) UpdateGId(updateGIdArgs UpdateGIdArgs, reply *interface{}) erro
 }
 
 func (s *Server) updateGId(updateGIdArgs UpdateGIdArgs, reply *interface{}) {
-	s.nextPutGId = updateGIdArgs.nextPutGId
+	s.NextPutGId = updateGIdArgs.NextPutGId
 
 	// Keep trying until server becomes head
 	for !s.isHead() {
-		err := s.PrevServer.Call(
-			"Server.UpdateGId",
-			UpdateGIdArgs{s.nextPutGId},
-			&reply,
-		)
+		if s.PrevServer != nil {
+			err := s.PrevServer.Call(
+				"Server.UpdateGId",
+				UpdateGIdArgs{s.NextPutGId},
+				&reply,
+			)
 
-		if err == nil {
-			break
+			if err == nil {
+				break
+			}
+		} else {
+			s.mu.Unlock()
+			s.mu.Lock()
 		}
 	}
 }
