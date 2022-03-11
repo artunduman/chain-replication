@@ -451,6 +451,8 @@ func (s *Server) putTail(trace *tracing.Trace, args PutArgs) error {
 		return err
 	}
 
+	defer client.Close()
+
 	replyArgs.GId = args.GId
 	replyArgs.OpId = args.OpId
 	replyArgs.Key = args.Key
@@ -586,6 +588,8 @@ func (s *Server) Get(args GetArgs, reply *interface{}) error {
 	if err != nil {
 		return err
 	}
+
+	defer client.Close()
 
 	replyArgs.GId = s.NextGetGId
 	replyArgs.OpId = args.OpId
